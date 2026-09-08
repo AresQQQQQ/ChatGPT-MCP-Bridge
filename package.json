@@ -1,0 +1,41 @@
+{
+  "name": "chatgpt-mcp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A secure local MCP bridge for workspace file access.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "mcp-bridge": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "assets/icons",
+    "README.md"
+  ],
+  "scripts": {
+    "export:source": "node tools/export-source.mjs",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "dev": "tsx src/cli.ts serve",
+    "bridge": "tsx src/cli.ts start",
+    "ui": "tsx src/cli.ts ui",
+    "start": "node dist/cli.js start"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
+    "pdfjs-dist": "6.1.200",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
