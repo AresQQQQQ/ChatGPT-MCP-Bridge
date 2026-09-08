@@ -24,6 +24,7 @@ import {
 import { WorkspaceRegistry } from "./workspaces/workspace-registry.js";
 import { BridgeController, listenBridge } from "./control/bridge-controller.js";
 import { launchLocalControlUi } from "./ui/windows-console.js";
+import { runSetupWizard } from "./setup/wizard.js";
 
 interface CliOptions {
   configPath: string;
@@ -256,13 +257,14 @@ async function start(options: CliOptions): Promise<number> {
 export async function runCli(args: readonly string[]): Promise<number> {
   const [command = "help", ...commandArgs] = args;
   const options = parseOptions(commandArgs);
+  if (command === "setup") return runSetupWizard(options.configPath);
   if (command === "init") return init(options);
   if (command === "doctor") return doctor(options);
   if (command === "serve") return serve(options);
   if (command === "start") return start(options);
   if (command === "ui") return ui(options);
   if (command === "help" || command === "--help" || command === "-h") {
-    console.log("Usage: mcp-bridge <init|serve|start|ui|doctor> [--config path] [--host host] [--port port]");
+    console.log("Usage: mcp-bridge <setup|init|serve|start|ui|doctor> [--config path] [--host host] [--port port]");
     return 0;
   }
   throw new Error(`Unknown command: ${command}`);

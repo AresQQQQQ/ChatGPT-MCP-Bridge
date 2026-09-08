@@ -40,7 +40,7 @@ export function buildTunnelSpawnSpec(
   env.LOG_LEVEL = sourceEnv.LOG_LEVEL ?? "warn";
   return {
     executable: config.clientPath,
-    args: ["run", "--profile", config.profile],
+    args: ["run", "--profile", config.profile, ...(config.profileDir ? ["--profile-dir", config.profileDir] : [])],
     env,
     options: {
       env,

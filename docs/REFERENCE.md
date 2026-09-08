@@ -4,6 +4,12 @@ A small local development bridge. It exposes explicitly allowed project roots ov
 
 The Bridge can supervise OpenAI's Secure MCP Tunnel client for a one-command local workflow. It also exposes bounded Git staging/commit operations and can optionally coordinate Codex Desktop while keeping workspace paths, task ownership, and execution policy under Bridge control. Existing Codex task turns are delivered through Desktop's local IPC owner; a short-lived app-server is retained only for bounded history/metadata operations and first-time thread creation. Normal `workspace` mode does not expose arbitrary shell access. `trusted-dev` intentionally adds trusted host developer execution and desktop-app launch capabilities; these are powerful user-authorized features, not OS sandboxes.
 
+## Automatic Windows setup
+
+Run `pnpm run setup` or `setup.cmd` after installing dependencies. The terminal wizard accepts a tunnel ID, a hidden Runtime API key, and a health port. It downloads the official Windows x64/ARM64 release ZIP, verifies its SHA-256 digest from GitHub release metadata, extracts only the executable, and initializes a dedicated profile under `.mcp-bridge-state`. Existing workspace and authentication configuration is preserved. Existing clients can be reused. Runtime keys are stored in the local `.env`, never in argv. Other parsed environment values are retained; comments and formatting are normalized.
+
+`tunnel.profileDir` is optional; when configured it is resolved relative to the Bridge config directory and passed to `tunnel-client run --profile-dir`. Existing configurations without it continue using the client's default profile location. Setup does not create cloud tunnels, prove runtime credentials, or configure the ChatGPT account. See the [Chinese walkthrough](../README.md) for the complete flow.
+
 ## Quick start
 
 Install Node.js 22+, Git, and pnpm. From a fresh source checkout:
@@ -249,6 +255,7 @@ Do not expose the Node HTTP listener directly to the internet. Put it behind use
 ## CLI
 
 ```text
+mcp-bridge setup [--config path]
 mcp-bridge init [--config path] [--force]
 mcp-bridge serve [--config path] [--host host] [--port port]
 mcp-bridge start [--config path] [--host host] [--port port]

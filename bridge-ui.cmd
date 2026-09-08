@@ -18,6 +18,11 @@ set "BRIDGE_TSX=%~dp0node_modules\tsx\dist\cli.mjs"
 set "BRIDGE_CLI=%~dp0src\cli.ts"
 set "BRIDGE_CONFIG=%~dp0mcp-bridge.json"
 
+if not exist "%BRIDGE_CONFIG%" (
+  call "%~dp0setup.cmd"
+  if errorlevel 1 exit /b 1
+)
+
 if not exist "%BRIDGE_TSX%" (
   echo Dependencies are missing. Run pnpm install once.
   pause

@@ -16,6 +16,7 @@
     "README.md"
   ],
   "scripts": {
+    "setup": "tsx src/cli.ts setup",
     "export:source": "node tools/export-source.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",

@@ -33,10 +33,12 @@ git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
 cd ChatGPT-MCP-Bridge
 pnpm install --frozen-lockfile
 pnpm build
-node dist/cli.js init
+pnpm run setup
 ```
 
-`init` 生成本机专用的 `mcp-bridge.json` 和随机认证令牌。已有配置时不要再次初始化或使用 `--force` 覆盖它。令牌保留在本机，不要填入 ChatGPT 项目指令。
+`pnpm run setup` 打开 Windows 交互式配置向导，也可双击 `setup.cmd`。先在 [Platform 隧道设置](https://platform.openai.com/settings/organization/tunnels) 创建隧道并关联目标 ChatGPT 工作空间，然后在向导中填写 Tunnel ID 和 Runtime API key（输入不会显示），健康端口默认按回车即可。
+
+向导自动检测 x64 / ARM64、下载官方稳定版 ZIP、校验 SHA-256、提取客户端并生成独立 profile。新安装会生成 `mcp-bridge.json` 和随机本地认证令牌；已有配置只更新 `tunnel` 字段，保留工作区、权限和认证令牌。已有客户端默认复用，也可选择重新下载。**命令使用 `pnpm run setup`，以免与 pnpm 自带的 `setup` 命令混淆。**
 
 ### 2. 注册要操作的本地项目
 
@@ -68,14 +70,33 @@ node dist/cli.js init
 
 ```powershell
 node dist/cli.js doctor
-node dist/cli.js serve
+.\bridge.cmd
 ```
 
-默认 MCP 地址是 `http://127.0.0.1:3000/mcp`。ChatGPT 云端不能直接访问这个本地地址；继续下一节建立隧道。`serve` 只启动 Bridge。
+等待 Bridge 和 Tunnel 两个 `READY` 状态，并保持进程运行。也可双击 `bridge-ui.cmd` 使用 Windows 控制窗口。首次运行这两个启动脚本时，若还没有 `mcp-bridge.json`，会先进入配置向导。
+
+默认 MCP 地址是 `http://127.0.0.1:3000/mcp`。ChatGPT 云端不能直接访问这个本地地址；下一节说明如何在 ChatGPT 中连接已配置的隧道。仅需本地 HTTP Bridge 时，可使用 `node dist/cli.js init` 初始化，再用 `node dist/cli.js serve` 启动，无需 Tunnel。
 
 ## 连接 ChatGPT
 
-### 1. 准备隧道
+### 1. 配置向导与本机文件
+
+完成上一节向导后，可直接跳到“创建 ChatGPT MCP 应用”。向导不会代你创建云端隧道或修改 ChatGPT 账号设置。它的网络操作仅为下载客户端，保存完成也不表示 ChatGPT 已连接成功。
+
+| 本机位置 | 内容 |
+| --- | --- |
+| `.mcp-bridge-state/tunnel-setup-*/` | 校验后的客户端、版本记录、独立 profile |
+| `mcp-bridge.json` | Bridge 工作区及 `tunnel.clientPath`、`profileDir` 等配置 |
+| `.env` | Runtime API key；留空输入可保留已有密钥 |
+
+这些文件均已 Git 忽略，并排除在源码导出之外。密钥不会作为客户端命令行参数传递。`.env` 更新会保留其他变量的解析值，但会重新整理格式及移除注释。文件使用仅用户读写的 POSIX 模式保存；Windows 权限仍受所在目录 ACL 管理。
+
+下载或 profile 初始化失败时不切换现有配置，临时文件会清理。重配前停止 Bridge，再运行 `pnpm run setup`；旧 profile 保留以免影响其他实例。若异常退出留下 `setup.lock`，先确认没有配置向导运行，再删除 `.mcp-bridge-state/setup.lock` 目录后重试。
+
+<details>
+<summary>手动配置（其他系统或不使用向导时）</summary>
+
+已有配置时保留它；全新安装可先执行 `node dist/cli.js init`。
 
 在 [Platform 隧道设置](https://platform.openai.com/settings/organization/tunnels) 创建隧道，关联目标 ChatGPT 工作空间，取得 `tunnel_id` 和 Runtime API key，并下载客户端。隧道权限与开发者模式权限分别管理。参见 [官方 Secure MCP Tunnel 文档](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)。
 
@@ -110,6 +131,8 @@ Copy-Item .env.example .env
 ```
 
 Bridge 会自动把本地 Bearer 认证头传给隧道客户端。等待 Bridge 与 Tunnel 两个 `READY` 状态，并保持进程运行。也可用 `.\bridge-ui.cmd` 打开 Windows 控制窗口。
+
+</details>
 
 ### 2. 创建 ChatGPT MCP 应用
 
@@ -189,6 +212,8 @@ Git 提交和推送遵循本次用户的明确要求；不要自行发布项目�
 
 | 问题 | 检查方法 |
 | --- | --- |
+| 下载失败、GitHub 限流或校验失败 | 检查访问 api.github.com 和 GitHub 发布下载的网络；稍后重试。向导不会跳过校验或静默切换第三方镜像，也支持手动配置 |
+| 向导提示需要交互式终端 | 使用终端中的 `pnpm run setup` 或 `setup.cmd`，不要通过日志管道或非交互任务输入密钥 |
 | 没有开发者模式或 Tunnel 入口 | 核对账号/工作空间权限及当前官方文档；项目指令无法开启账号功能 |
 | 隧道不在列表中 | 检查目标工作空间关联与 Tunnels Read + Use 权限 |
 | 工具不可用或应用发现失败 | 保持 Bridge 和 Tunnel 运行，核对 READY 状态、profile、端口和本机 `.env` |

@@ -66,6 +66,7 @@ const allowedHostSchema = z.string().min(1).refine(isValidAllowedHost, "must be 
 const allowedOriginSchema = z.string().refine(isExactOrigin, "must be an exact http(s) origin");
 const tunnelConfigSchema = z.object({
   clientPath: z.string().min(1),
+  profileDir: z.string().min(1).optional(),
   profile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "must be a safe profile name"),
   healthUrl: z.string().url().refine(isLoopbackUrl, "must use a loopback http URL").optional(),
 });
@@ -149,6 +150,7 @@ export interface BridgeConfig {
 
 export interface TunnelConfig {
   readonly clientPath: string;
+  readonly profileDir?: string;
   readonly profile: string;
   readonly healthUrl: string;
 }
@@ -306,6 +308,7 @@ export async function loadConfig(
       ? {
           tunnel: {
             clientPath: path.resolve(configDirectory, parsed.data.tunnel.clientPath),
+            ...(parsed.data.tunnel.profileDir ? { profileDir: path.resolve(configDirectory, parsed.data.tunnel.profileDir) } : {}),
             profile: parsed.data.tunnel.profile,
             healthUrl: parsed.data.tunnel.healthUrl ?? DEFAULT_TUNNEL_HEALTH_URL,
           },
