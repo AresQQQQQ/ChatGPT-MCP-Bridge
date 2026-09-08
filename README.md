@@ -157,3 +157,9 @@ pnpm export:source
 
 - [手动配置与维护](docs/SETUP.md)：本机文件、重新配置、Codex Desktop、外部 MCP 和源码导出。
 - [技术参考](docs/REFERENCE.md)：工具、执行权限、HTTP 认证和 Codex 任务模型。
+
+## 许可证
+
+Copyright 2026 AresQ (AresQQQQQ).
+
+本项目采用 [Apache License 2.0](LICENSE)。第三方依赖和资源保留各自的许可证；树形图标来源见[资源说明](assets/icons/tree/SOURCES.md)。

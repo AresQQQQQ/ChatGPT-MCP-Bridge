@@ -13,7 +13,8 @@
   "files": [
     "dist",
     "assets/icons",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "setup": "tsx src/cli.ts setup",
@@ -38,5 +39,6 @@
     "@types/node": "^24.10.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
-  }
+  },
+  "license": "Apache-2.0"
 }
