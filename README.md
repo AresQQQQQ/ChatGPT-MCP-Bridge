@@ -36,9 +36,19 @@ pnpm build
 pnpm run setup
 ```
 
-`pnpm run setup` 打开 Windows 交互式配置向导，也可双击 `setup.cmd`。先在 [Platform 隧道设置](https://platform.openai.com/settings/organization/tunnels) 创建隧道并关联目标 ChatGPT 工作空间，然后在向导中填写 Tunnel ID 和 Runtime API key（输入不会显示），健康端口默认按回车即可。
+`pnpm run setup` 打开 Windows 交互式配置向导，也可双击 `setup.cmd`。先在 [Platform 隧道设置](https://platform.openai.com/settings/organization/tunnels) 创建隧道并关联目标 ChatGPT 工作空间，然后在向导中填写 Tunnel ID 和 [Runtime API key](https://platform.openai.com/settings/organization/api-keys)（输入不会显示），健康端口默认按回车即可。
 
 向导自动检测 x64 / ARM64、下载官方稳定版 ZIP、校验 SHA-256、提取客户端并生成独立 profile。新安装会生成 `mcp-bridge.json` 和随机本地认证令牌；已有配置只更新 `tunnel` 字段，保留工作区、权限和认证令牌。已有客户端默认复用，也可选择重新下载。**命令使用 `pnpm run setup`，以免与 pnpm 自带的 `setup` 命令混淆。**
+
+### Runtime API key 从哪里获取
+
+**获取入口：[OpenAI Platform → Runtime API keys](https://platform.openai.com/settings/organization/api-keys)。**
+
+1. 登录后切换到拥有该 Tunnel 的 Platform 组织，在上述页面创建运行时 API key。
+2. 创建密钥的账号或身份需要该组织的 **Tunnels Read + Use** 权限；没有权限时联系组织管理员。
+3. 将密钥粘贴到 `pnpm run setup` 的 **Runtime API key** 提示中；向导会保存到本机 `.env` 的 `CONTROL_PLANE_API_KEY`。手动配置时填写同一个变量。
+
+Tunnel ID 在 [隧道设置](https://platform.openai.com/settings/organization/tunnels) 获取；Runtime API key 在上面的密钥页面获取。这里使用运行时密钥，不要用 Admin API key，也不要把密钥填进 ChatGPT 项目指令或上传 GitHub。权限说明见 [官方隧道文档](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels#permissions-and-access)。
 
 ### 2. 注册要操作的本地项目
 
@@ -98,7 +108,7 @@ node dist/cli.js doctor
 
 已有配置时保留它；全新安装可先执行 `node dist/cli.js init`。
 
-在 [Platform 隧道设置](https://platform.openai.com/settings/organization/tunnels) 创建隧道，关联目标 ChatGPT 工作空间，取得 `tunnel_id` 和 Runtime API key，并下载客户端。隧道权限与开发者模式权限分别管理。参见 [官方 Secure MCP Tunnel 文档](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)。
+在 [Platform 隧道设置](https://platform.openai.com/settings/organization/tunnels) 创建隧道，关联目标 ChatGPT 工作空间，取得 `tunnel_id`，再到 [Runtime API keys 页面](https://platform.openai.com/settings/organization/api-keys) 创建运行时密钥，并下载客户端。隧道权限与开发者模式权限分别管理。参见 [官方 Secure MCP Tunnel 文档](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)。
 
 用真实路径和 ID 替换下面的占位符，创建本地 HTTP profile（参数已按本项目使用的客户端帮助核对）：
 
