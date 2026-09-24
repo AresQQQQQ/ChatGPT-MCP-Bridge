@@ -49,7 +49,10 @@ export type WorkspaceFileErrorCode =
   | "PLAN_PARTIAL"
   | "COPY_TREE_PARTIAL"
   | "CONTENT_MISMATCH"
-  | "SNAPSHOT_LIMIT";
+  | "SNAPSHOT_LIMIT"
+  | "UPLOAD_NOT_FOUND"
+  | "UPLOAD_SIZE_MISMATCH"
+  | "UPLOAD_HASH_MISMATCH";
 
 const WORKSPACE_FILE_MESSAGES: Record<WorkspaceFileErrorCode, string> = {
   FILE_NOT_FOUND: "File not found",
@@ -75,6 +78,9 @@ const WORKSPACE_FILE_MESSAGES: Record<WorkspaceFileErrorCode, string> = {
   COPY_TREE_PARTIAL: "Tree copy failed after the target was created; the partial target was preserved for safe inspection",
   CONTENT_MISMATCH: "File content hash does not match the expected value",
   SNAPSHOT_LIMIT: "Tree snapshot exceeded its configured safety limit",
+  UPLOAD_NOT_FOUND: "Chunked write session was not found or has expired",
+  UPLOAD_SIZE_MISMATCH: "Chunked write size does not match the declared total",
+  UPLOAD_HASH_MISMATCH: "Chunked write content hash does not match the expected value",
 };
 
 export class WorkspaceFileError extends Error {
@@ -101,6 +107,7 @@ export interface WorkspaceInfo {
   readonly workspaceId: string;
   readonly root: string;
   readonly mode: WorkspaceMode;
+  readonly maxReadBytes: number;
   readonly allowedScripts: readonly string[];
   readonly context?: readonly WorkspaceContextFile[];
 }
@@ -295,6 +302,28 @@ export interface WriteFileStreamResult extends WriteFileResult {
   readonly contentHash: string;
 }
 
+export interface ChunkedWriteBeginResult {
+  readonly workspaceId: string;
+  readonly uploadId: string;
+  readonly path: string;
+  readonly chunkSize: number;
+  readonly maxBytes: number;
+  readonly expiresAt: number;
+}
+
+export interface ChunkedWriteChunkResult {
+  readonly workspaceId: string;
+  readonly uploadId: string;
+  readonly path: string;
+  readonly bytesReceived: number;
+  readonly expiresAt: number;
+}
+
+export interface ChunkedWriteCommitResult extends WriteFileResult {
+  readonly uploadId: string;
+  readonly contentHash: string;
+}
+
 export interface CreateDirectoryRequest {
   readonly workspaceId: string;
   readonly path: string;
@@ -398,6 +427,19 @@ export interface ApplyPatchRequest {
   readonly patch: PatchInput;
 }
 
+interface StoredChunkedWrite {
+  readonly workspaceId: string;
+  readonly uploadId: string;
+  readonly relativePath: string;
+  readonly targetPath: string;
+  readonly temporaryPath: string;
+  readonly maxBytes: number;
+  readonly totalBytes?: number;
+  readonly expectedHash?: string;
+  bytesReceived: number;
+  expiresAt: number;
+}
+
 interface StoredTreeSnapshot {
   readonly workspaceId: string;
   readonly rootPath: string;
@@ -492,6 +534,10 @@ const MAX_ACTIVE_FILE_PLANS = 64;
 const TREE_SNAPSHOT_TTL_MS = 10 * 60 * 1000;
 const MAX_ACTIVE_TREE_SNAPSHOTS = 32;
 const MAX_ACTIVE_CURSORS = 256;
+const CHUNKED_WRITE_TTL_MS = 10 * 60 * 1000;
+const MAX_ACTIVE_CHUNKED_WRITES = 32;
+const CHUNKED_WRITE_CHUNK_BYTES = 512 * 1024;
+const MAX_CHUNKED_WRITE_BYTES = 128 * 1024 * 1024;
 
 function assertPageLimit(limit: number): void {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_DIRECTORY_ENTRIES) {
@@ -827,6 +873,7 @@ export class WorkspaceRegistry {
   private readonly traversalCursors = new Map<string, StoredCursorState>();
   private readonly filePlans = new Map<string, StoredFilePlan>();
   private readonly treeSnapshots = new Map<string, StoredTreeSnapshot>();
+  private readonly chunkedWrites = new Map<string, StoredChunkedWrite>();
   private readonly mutationTails = new Map<string, Promise<void>>();
 
   private constructor() {}
@@ -848,14 +895,18 @@ export class WorkspaceRegistry {
           mode,
         }], { symlinkPolicy: "deny" });
         const root = sandbox.getRoot(workspace.id);
+        const maxReadBytes = workspace.maxReadBytes ?? config.maxReadBytes;
+        if (!Number.isSafeInteger(maxReadBytes) || maxReadBytes <= 0 || maxReadBytes > 50 * 1024 * 1024) {
+          throw new Error("Invalid workspace read limit");
+        }
         registry.workspaces.set(workspace.id, {
           workspaceId: workspace.id,
           root: root.path,
           mode: root.mode,
+          maxReadBytes,
           allowedScripts: workspace.allowedScripts ?? ["test", "build", "lint", "typecheck"],
           recipes: workspace.recipes ?? {},
           sandbox,
-          maxReadBytes: config.maxReadBytes,
         });
       } catch {
         throw new WorkspaceUnavailableError(workspace.id);
@@ -915,6 +966,7 @@ export class WorkspaceRegistry {
       workspaceId: workspace.workspaceId,
       root: workspace.root,
       mode: workspace.mode,
+      maxReadBytes: workspace.maxReadBytes,
       allowedScripts: workspace.allowedScripts,
       context,
     };
@@ -1382,8 +1434,10 @@ export class WorkspaceRegistry {
     }
     const includeContent = options.includeContent ?? true;
     const caseSensitive = options.caseSensitive ?? false;
-    const maxFileBytes = options.maxFileBytes ?? Math.min(workspace.maxReadBytes, 512 * 1024);
-    if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes <= 0) throw new WorkspaceFileError("INVALID_SEARCH");
+    const maxFileBytes = options.maxFileBytes ?? Math.min(workspace.maxReadBytes, 2 * 1024 * 1024);
+    if (!Number.isSafeInteger(maxFileBytes) || maxFileBytes <= 0 || maxFileBytes > workspace.maxReadBytes) {
+      throw new WorkspaceFileError("INVALID_SEARCH");
+    }
     const rootPath = options.path ?? ".";
     await this.pruneExpiredCursors();
 
@@ -1621,6 +1675,203 @@ export class WorkspaceRegistry {
         if (error instanceof PathSecurityError || error instanceof WorkspaceFileError) throw error;
         throw mutationError(error);
       }
+    });
+  }
+
+  public async beginChunkedWrite(
+    workspaceId: string,
+    relativePath: string,
+    options: { readonly totalBytes?: number; readonly expectedHash?: string; readonly maxBytes?: number } = {},
+  ): Promise<ChunkedWriteBeginResult> {
+    const maxBytes = options.maxBytes ?? MAX_CHUNKED_WRITE_BYTES;
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_CHUNKED_WRITE_BYTES) {
+      throw new WorkspaceFileError("INVALID_OPERATION");
+    }
+    if (
+      options.totalBytes !== undefined &&
+      (!Number.isSafeInteger(options.totalBytes) || options.totalBytes < 0 || options.totalBytes > maxBytes)
+    ) {
+      throw new WorkspaceFileError("INVALID_OPERATION");
+    }
+    if (options.expectedHash !== undefined && !/^[a-f0-9]{64}$/u.test(options.expectedHash)) {
+      throw new WorkspaceFileError("INVALID_OPERATION");
+    }
+
+    return this.withWorkspaceMutation(workspaceId, async () => {
+      await this.pruneExpiredChunkedWrites();
+      while (this.chunkedWrites.size >= MAX_ACTIVE_CHUNKED_WRITES) {
+        const oldest = [...this.chunkedWrites.values()].sort((a, b) => a.expiresAt - b.expiresAt)[0];
+        if (!oldest) break;
+        this.chunkedWrites.delete(oldest.uploadId);
+        await unlink(oldest.temporaryPath).catch(() => undefined);
+      }
+
+      const workspace = this.requireWorkspace(workspaceId);
+      const resolved = await this.resolveExistingOrNew(workspace, relativePath, "write");
+      if (resolved.lexicalPath === resolved.rootPath) throw new WorkspaceFileError("INVALID_OPERATION");
+      if (resolved.exists) {
+        const metadata = await stat(resolved.canonicalPath ?? resolved.lexicalPath).catch(() => undefined);
+        if (!metadata?.isFile()) throw new WorkspaceFileError("NOT_A_FILE");
+      }
+
+      const uploadId = randomUUID();
+      const temporaryPath = path.join(path.dirname(resolved.lexicalPath), `.mcp-bridge-upload-${uploadId}.tmp`);
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        handle = await open(
+          temporaryPath,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollowFlag(),
+          0o600,
+        );
+      } catch {
+        throw new WorkspaceFileError("WRITE_FAILED");
+      } finally {
+        await handle?.close().catch(() => undefined);
+      }
+
+      const expiresAt = Date.now() + CHUNKED_WRITE_TTL_MS;
+      this.chunkedWrites.set(uploadId, {
+        workspaceId,
+        uploadId,
+        relativePath,
+        targetPath: resolved.lexicalPath,
+        temporaryPath,
+        maxBytes,
+        ...(options.totalBytes !== undefined ? { totalBytes: options.totalBytes } : {}),
+        ...(options.expectedHash !== undefined ? { expectedHash: options.expectedHash } : {}),
+        bytesReceived: 0,
+        expiresAt,
+      });
+      return {
+        workspaceId,
+        uploadId,
+        path: relativePath,
+        chunkSize: CHUNKED_WRITE_CHUNK_BYTES,
+        maxBytes,
+        expiresAt,
+      };
+    });
+  }
+
+  public async writeChunk(
+    workspaceId: string,
+    uploadId: string,
+    offset: number,
+    content: string,
+  ): Promise<ChunkedWriteChunkResult> {
+    if (!Number.isSafeInteger(offset) || offset < 0 || typeof content !== "string") {
+      throw new WorkspaceFileError("INVALID_OPERATION");
+    }
+    const chunk = Buffer.from(content, "utf8");
+    if (chunk.byteLength < 1 || chunk.byteLength > CHUNKED_WRITE_CHUNK_BYTES) {
+      throw new WorkspaceFileError("INVALID_OPERATION");
+    }
+
+    return this.withWorkspaceMutation(workspaceId, async () => {
+      await this.pruneExpiredChunkedWrites();
+      const upload = this.chunkedWrites.get(uploadId);
+      if (!upload || upload.workspaceId !== workspaceId) throw new WorkspaceFileError("UPLOAD_NOT_FOUND");
+      if (offset !== upload.bytesReceived) throw new WorkspaceFileError("INVALID_OPERATION");
+      const nextBytes = upload.bytesReceived + chunk.byteLength;
+      if (nextBytes > upload.maxBytes || (upload.totalBytes !== undefined && nextBytes > upload.totalBytes)) {
+        throw new WorkspaceFileError("FILE_TOO_LARGE");
+      }
+
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      try {
+        handle = await open(upload.temporaryPath, constants.O_WRONLY | noFollowFlag());
+        const metadata = await handle.stat();
+        if (!metadata.isFile() || metadata.size !== upload.bytesReceived) throw new WorkspaceFileError("FILE_UNAVAILABLE");
+        let written = 0;
+        while (written < chunk.byteLength) {
+          const result = await handle.write(chunk, written, chunk.byteLength - written, offset + written);
+          if (result.bytesWritten <= 0) throw new WorkspaceFileError("WRITE_FAILED");
+          written += result.bytesWritten;
+        }
+      } catch (error) {
+        if (error instanceof WorkspaceFileError || error instanceof PathSecurityError) throw error;
+        throw new WorkspaceFileError("WRITE_FAILED");
+      } finally {
+        await handle?.close().catch(() => undefined);
+      }
+
+      upload.bytesReceived = nextBytes;
+      upload.expiresAt = Date.now() + CHUNKED_WRITE_TTL_MS;
+      return {
+        workspaceId,
+        uploadId,
+        path: upload.relativePath,
+        bytesReceived: upload.bytesReceived,
+        expiresAt: upload.expiresAt,
+      };
+    });
+  }
+
+  public async commitChunkedWrite(workspaceId: string, uploadId: string): Promise<ChunkedWriteCommitResult> {
+    return this.withWorkspaceMutation(workspaceId, async () => {
+      await this.pruneExpiredChunkedWrites();
+      const upload = this.chunkedWrites.get(uploadId);
+      if (!upload || upload.workspaceId !== workspaceId) throw new WorkspaceFileError("UPLOAD_NOT_FOUND");
+      if (upload.totalBytes !== undefined && upload.bytesReceived !== upload.totalBytes) {
+        throw new WorkspaceFileError("UPLOAD_SIZE_MISMATCH");
+      }
+
+      const workspace = this.requireWorkspace(workspaceId);
+      const target = await this.resolveExistingOrNew(workspace, upload.relativePath, "write");
+      if (target.lexicalPath !== upload.targetPath) throw new WorkspaceFileError("FILE_UNAVAILABLE");
+      if (target.exists) {
+        const metadata = await stat(target.canonicalPath ?? target.lexicalPath).catch(() => undefined);
+        if (!metadata?.isFile()) throw new WorkspaceFileError("NOT_A_FILE");
+      }
+
+      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      let contentHash: string;
+      try {
+        handle = await open(upload.temporaryPath, constants.O_RDONLY | noFollowFlag());
+        const metadata = await handle.stat();
+        if (!metadata.isFile() || metadata.size !== upload.bytesReceived) throw new WorkspaceFileError("FILE_UNAVAILABLE");
+        const hash = createHash("sha256");
+        const buffer = Buffer.allocUnsafe(64 * 1024);
+        let position = 0;
+        while (position < metadata.size) {
+          const requested = Math.min(buffer.byteLength, metadata.size - position);
+          const { bytesRead } = await handle.read(buffer, 0, requested, position);
+          if (bytesRead <= 0) throw new WorkspaceFileError("FILE_UNAVAILABLE");
+          hash.update(buffer.subarray(0, bytesRead));
+          position += bytesRead;
+        }
+        contentHash = hash.digest("hex");
+      } finally {
+        await handle?.close().catch(() => undefined);
+      }
+      if (upload.expectedHash && contentHash !== upload.expectedHash) {
+        throw new WorkspaceFileError("UPLOAD_HASH_MISMATCH");
+      }
+
+      try {
+        await rename(upload.temporaryPath, upload.targetPath);
+      } catch {
+        throw new WorkspaceFileError("WRITE_FAILED");
+      }
+      this.chunkedWrites.delete(uploadId);
+      return {
+        workspaceId,
+        uploadId,
+        path: upload.relativePath,
+        bytes: upload.bytesReceived,
+        contentHash,
+      };
+    });
+  }
+
+  public async abortChunkedWrite(workspaceId: string, uploadId: string): Promise<{ readonly workspaceId: string; readonly uploadId: string; readonly aborted: true }> {
+    return this.withWorkspaceMutation(workspaceId, async () => {
+      await this.pruneExpiredChunkedWrites();
+      const upload = this.chunkedWrites.get(uploadId);
+      if (!upload || upload.workspaceId !== workspaceId) throw new WorkspaceFileError("UPLOAD_NOT_FOUND");
+      this.chunkedWrites.delete(uploadId);
+      await unlink(upload.temporaryPath).catch(() => undefined);
+      return { workspaceId, uploadId, aborted: true };
     });
   }
 
@@ -2200,10 +2451,11 @@ export class WorkspaceRegistry {
   }
 
   public listWorkspaces(): readonly WorkspaceInfo[] {
-    return [...this.workspaces.values()].map(({ workspaceId, root, mode, allowedScripts }) => ({
+    return [...this.workspaces.values()].map(({ workspaceId, root, mode, maxReadBytes, allowedScripts }) => ({
       workspaceId,
       root,
       mode,
+      maxReadBytes,
       allowedScripts,
     }));
   }
@@ -2296,6 +2548,15 @@ export class WorkspaceRegistry {
     const now = Date.now();
     for (const [snapshotId, snapshot] of this.treeSnapshots) {
       if (snapshot.expiresAt <= now) this.treeSnapshots.delete(snapshotId);
+    }
+  }
+
+  private async pruneExpiredChunkedWrites(): Promise<void> {
+    const now = Date.now();
+    for (const [uploadId, upload] of this.chunkedWrites) {
+      if (upload.expiresAt > now) continue;
+      this.chunkedWrites.delete(uploadId);
+      await unlink(upload.temporaryPath).catch(() => undefined);
     }
   }
 

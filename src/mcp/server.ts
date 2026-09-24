@@ -439,15 +439,17 @@ export function createMcpServer(
         workspaceId: z.string(),
         root: z.string(),
         mode: z.enum(["readonly", "workspace", "trusted-dev", "handoff"]),
+        maxReadBytes: z.number().int().positive(),
         allowedScripts: z.array(z.string()),
       })),
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, async () => {
-    const workspaces = registry.listWorkspaces().map(({ workspaceId, root, mode, allowedScripts }) => ({
+    const workspaces = registry.listWorkspaces().map(({ workspaceId, root, mode, maxReadBytes, allowedScripts }) => ({
       workspaceId,
       root,
       mode,
+      maxReadBytes,
       allowedScripts: [...allowedScripts],
     }));
     return {
@@ -463,6 +465,7 @@ export function createMcpServer(
     outputSchema: z.object({
       workspaceId: z.string(),
       mode: z.enum(["readonly", "workspace", "trusted-dev", "handoff"]),
+      maxReadBytes: z.number().int().positive(),
       allowedScripts: z.array(z.string()),
       context: z.array(workspaceContextSchema),
     }),
@@ -475,6 +478,7 @@ export function createMcpServer(
         structuredContent: {
           workspaceId: workspace.workspaceId,
           mode: workspace.mode,
+          maxReadBytes: workspace.maxReadBytes,
           allowedScripts: workspace.allowedScripts,
           context: workspace.context ?? [],
         },
@@ -490,6 +494,7 @@ export function createMcpServer(
       workspaceId: z.string(),
       root: z.string(),
       mode: z.enum(["readonly", "workspace", "trusted-dev", "handoff"]),
+      maxReadBytes: z.number().int().positive(),
       allowedScripts: z.array(z.string()),
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -501,6 +506,7 @@ export function createMcpServer(
         workspaceId: workspace.workspaceId,
         root: workspace.root,
         mode: workspace.mode,
+        maxReadBytes: workspace.maxReadBytes,
         allowedScripts: [...workspace.allowedScripts],
       };
       return {
@@ -741,6 +747,7 @@ export function createMcpServer(
       maxDepth: z.number().int().min(0).max(64).default(32),
       includeContent: z.boolean().default(true),
       caseSensitive: z.boolean().default(false),
+      maxFileBytes: z.number().int().min(1).max(50 * 1024 * 1024).optional(),
       cursor: z.string().min(1).max(128).optional(),
     }).strict(),
     outputSchema: z.object({
@@ -750,10 +757,16 @@ export function createMcpServer(
       ...paginationSchema,
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  }, async ({ workspaceId, query, path, maxResults, maxDepth, includeContent, caseSensitive, cursor }) => {
+  }, async ({ workspaceId, query, path, maxResults, maxDepth, includeContent, caseSensitive, maxFileBytes, cursor }) => {
     try {
       const result = await registry.search(workspaceId, query, {
-        path, maxResults, maxDepth, includeContent, caseSensitive, ...(cursor ? { cursor } : {}),
+        path,
+        maxResults,
+        maxDepth,
+        includeContent,
+        caseSensitive,
+        ...(maxFileBytes !== undefined ? { maxFileBytes } : {}),
+        ...(cursor ? { cursor } : {}),
       });
       const structuredContent = { ...result };
       return {
@@ -974,6 +987,106 @@ export function createMcpServer(
         content: [{ type: "text", text: `Wrote ${result.bytes} bytes to ${path}` }],
         structuredContent: { workspaceId: result.workspaceId, path: result.path, bytes: result.bytes },
       };
+    } catch (error) { return toolError(error); }
+  });
+
+  server.registerTool("write_file_begin", {
+    title: "Begin chunked file write",
+    description: "Begin a bounded chunked UTF-8 file write for large source/generated text. Data is written to a private temporary file and the target path is not replaced until write_file_commit succeeds.",
+    inputSchema: z.object({
+      workspaceId: workspaceIdSchema,
+      path: relativePathSchema,
+      totalBytes: z.number().int().nonnegative().max(128 * 1024 * 1024).optional(),
+      expectedSha256: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
+      maxBytes: z.number().int().min(1).max(128 * 1024 * 1024).optional(),
+    }).strict(),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      uploadId: z.string().uuid(),
+      path: z.string(),
+      chunkSize: z.number().int().positive(),
+      maxBytes: z.number().int().positive(),
+      expiresAt: z.number().int().positive(),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ workspaceId, path, totalBytes, expectedSha256, maxBytes }) => {
+    try {
+      const result = await registry.beginChunkedWrite(workspaceId, path, {
+        ...(totalBytes !== undefined ? { totalBytes } : {}),
+        ...(expectedSha256 !== undefined ? { expectedHash: expectedSha256 } : {}),
+        ...(maxBytes !== undefined ? { maxBytes } : {}),
+      });
+      const structuredContent = { ...result };
+      return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
+    } catch (error) { return toolError(error); }
+  });
+
+  server.registerTool("write_file_chunk", {
+    title: "Write file chunk",
+    description: "Append the next UTF-8 chunk to an active chunked write. offset is a byte offset and must exactly equal the bytesReceived returned by the previous chunk. Each chunk is limited to 512 KiB.",
+    inputSchema: z.object({
+      workspaceId: workspaceIdSchema,
+      uploadId: z.string().uuid(),
+      offset: z.number().int().nonnegative(),
+      content: z.string().min(1).max(512 * 1024),
+    }).strict(),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      uploadId: z.string().uuid(),
+      path: z.string(),
+      bytesReceived: z.number().int().nonnegative(),
+      expiresAt: z.number().int().positive(),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ workspaceId, uploadId, offset, content }) => {
+    try {
+      const result = await registry.writeChunk(workspaceId, uploadId, offset, content);
+      const structuredContent = { ...result };
+      return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
+    } catch (error) { return toolError(error); }
+  });
+
+  server.registerTool("write_file_commit", {
+    title: "Commit chunked file write",
+    description: "Validate and atomically replace/create the target file from a completed chunked write. If totalBytes or expectedSha256 were declared at begin time they must match before commit.",
+    inputSchema: z.object({
+      workspaceId: workspaceIdSchema,
+      uploadId: z.string().uuid(),
+    }).strict(),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      uploadId: z.string().uuid(),
+      path: z.string(),
+      bytes: z.number().int().nonnegative(),
+      contentHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+  }, async ({ workspaceId, uploadId }) => {
+    try {
+      const result = await registry.commitChunkedWrite(workspaceId, uploadId);
+      const structuredContent = { ...result };
+      return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
+    } catch (error) { return toolError(error); }
+  });
+
+  server.registerTool("write_file_abort", {
+    title: "Abort chunked file write",
+    description: "Abort an active chunked write and delete its private temporary file without changing the target path.",
+    inputSchema: z.object({
+      workspaceId: workspaceIdSchema,
+      uploadId: z.string().uuid(),
+    }).strict(),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      uploadId: z.string().uuid(),
+      aborted: z.literal(true),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ workspaceId, uploadId }) => {
+    try {
+      const result = await registry.abortChunkedWrite(workspaceId, uploadId);
+      const structuredContent = { ...result };
+      return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
     } catch (error) { return toolError(error); }
   });
 

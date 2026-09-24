@@ -1,4 +1,4 @@
-export const BRIDGE_CAPABILITY_VERSION = 6 as const;
+export const BRIDGE_CAPABILITY_VERSION = 7 as const;
 export const CODEX_STATE_VERSION = 4 as const;
 export const CODEX_MODULE_MODEL = "configured-temporary-single-binding" as const;
 export const CODEX_EXECUTION_TRANSPORT = "desktop-ipc" as const;

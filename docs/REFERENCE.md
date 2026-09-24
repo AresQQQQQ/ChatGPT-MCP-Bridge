@@ -80,7 +80,7 @@ All accessible roots must be listed explicitly:
   "host": "127.0.0.1",
   "port": 3000,
   "mcpPath": "/mcp",
-  "maxReadBytes": 1048576,
+  "maxReadBytes": 8388608,
   "tunnel": {
     "clientPath": "C:/path/to/tunnel-client.exe",
     "profile": "web-test",
@@ -97,6 +97,7 @@ All accessible roots must be listed explicitly:
       "id": "project",
       "root": "C:/work/project",
       "mode": "workspace",
+      "maxReadBytes": 33554432,
       "allowedScripts": ["test", "build", "lint", "typecheck"],
       "codex": {
         "enabled": true,
@@ -112,7 +113,7 @@ All accessible roots must be listed explicitly:
 
 `tunnel` is only required by the combined `start` command. Its control-plane key is read from `.env` next to the config file, never from `mcp-bridge.json`. If the Bridge has a local bearer token, `start` automatically supplies it to the Tunnel client for MCP discovery and requests.
 
-Relative roots are resolved from the config file directory. Workspace IDs, access modes, allowed package-script names, and Codex enablement are server-owned configuration; an MCP caller cannot upgrade them. `codex.clientPath` is optional when the local Codex runtime can be discovered automatically; it is used only by the short-lived app-server helper, not for normal Desktop-owned task turns. Bridge-owned Codex module/thread/task state is stored internally at `.mcp-bridge-state/codex.json`; that directory is Git-ignored and blocked from ordinary workspace MCP file access.
+Relative roots are resolved from the config file directory. The global `maxReadBytes` defaults to 8 MiB and may be overridden per workspace up to 50 MiB; omitted workspace overrides inherit the global value. Workspace IDs, access modes, read limits, allowed package-script names, and Codex enablement are server-owned configuration; an MCP caller cannot upgrade them. `codex.clientPath` is optional when the local Codex runtime can be discovered automatically; it is used only by the short-lived app-server helper, not for normal Desktop-owned task turns. Bridge-owned Codex module/thread/task state is stored internally at `.mcp-bridge-state/codex.json`; that directory is Git-ignored and blocked from ordinary workspace MCP file access.
 
 Codex conversations are scoped by the workspace's canonical root directory. Current generic Codex app-server APIs provide an exact `cwd` thread filter but do not expose Codex Desktop's saved-project identity as a stable project ID, so the Bridge intentionally uses canonical `workspaceId -> root` binding rather than guessing a Desktop project association.
 
@@ -130,11 +131,15 @@ Modes:
 - `get_workspace_info({ workspaceId })`
 - `read_file({ workspaceId, path, offset?, limit? })`
 - `list_directory({ workspaceId, path?, cursor?, limit? })`
-- `search({ workspaceId, query, path?, maxResults?, maxDepth?, includeContent?, caseSensitive?, cursor? })`
+- `search({ workspaceId, query, path?, maxResults?, maxDepth?, includeContent?, caseSensitive?, maxFileBytes?, cursor? })`
 - `stat_file({ workspaceId, path, includeHash? })`
 - `find_files({ workspaceId, pattern, path?, maxResults?, maxDepth?, caseSensitive?, cursor? })`
 - `apply_patch({ workspaceId, path, patch })`
 - `write_file({ workspaceId, path, content })`
+- `write_file_begin({ workspaceId, path, totalBytes?, expectedSha256?, maxBytes? })`
+- `write_file_chunk({ workspaceId, uploadId, offset, content })`
+- `write_file_commit({ workspaceId, uploadId })`
+- `write_file_abort({ workspaceId, uploadId })`
 - `create_directory({ workspaceId, path })`
 - `copy_file({ workspaceId, sourcePath, targetPath })`
 - `move_path({ workspaceId, sourcePath, targetPath })`
@@ -170,7 +175,7 @@ When at least one workspace has `codex.enabled: true`, eleven additional tools a
 - `codex_continue_task({ workspaceId, taskId, instruction, requestId? })`
 - `codex_cancel_task({ workspaceId, taskId })`
 
-Use `list_workspaces` when the configured IDs are not already known, then call `open_workspace`. It returns the selected ID, mode, allowed scripts, and bounded contents of root-level `AGENTS.md` and `CLAUDE.md` when present. Every later operation still requires and validates `workspaceId`; every file path and command cwd is workspace-relative. Search results can include a bounded matching-line preview. `list_directory`, `search`, and `find_files` return `truncated` plus an opaque `nextCursor` when traversal can continue. Pagination cursors retain bounded server-side directory traversal state so later pages resume instead of rescanning completed entries; cursors expire after five minutes, are single-use, and are invalidated by a Bridge restart. Large files can be read in bounded byte pages by passing `offset` and `limit`, then continuing from the returned `nextOffset` until `eof` is true. `stat_file` returns safe metadata and can optionally compute a SHA-256 content hash for regular files within the configured read limit. `find_files` supports bounded workspace-relative `*`, `?`, and `**` glob matching while preserving the same blocked-path and symlink rules. Directory deletion is non-recursive and moves never replace an existing target. Git inspection is read-only, while staging and local commit are exposed as separate bounded tools.
+Use `list_workspaces` when the configured IDs are not already known, then call `open_workspace`. It returns the selected ID, mode, allowed scripts, and bounded contents of root-level `AGENTS.md` and `CLAUDE.md` when present. Every later operation still requires and validates `workspaceId`; every file path and command cwd is workspace-relative. Search results can include a bounded matching-line preview. `list_directory`, `search`, and `find_files` return `truncated` plus an opaque `nextCursor` when traversal can continue. Pagination cursors retain bounded server-side directory traversal state so later pages resume instead of rescanning completed entries; cursors expire after five minutes, are single-use, and are invalidated by a Bridge restart. Large files can be read in bounded byte pages by passing `offset` and `limit`, then continuing from the returned `nextOffset` until `eof` is true. Content search scans files up to 2 MiB by default; callers may raise `maxFileBytes` up to that workspace's read limit when a known large source file must be searched. `stat_file` returns safe metadata and can optionally compute a SHA-256 content hash for regular files within the configured read limit. `find_files` supports bounded workspace-relative `*`, `?`, and `**` glob matching while preserving the same blocked-path and symlink rules. Directory deletion is non-recursive and moves never replace an existing target. Git inspection is read-only, while staging and local commit are exposed as separate bounded tools.
 
 `git_show` returns the bounded commit patch when `path` is omitted. When `path` is supplied, it returns that file's contents at the selected revision, which is useful for comparing historical source without checking out or restoring files.
 
@@ -188,7 +193,7 @@ Use `list_workspaces` when the configured IDs are not already known, then call `
 }
 ```
 
-All hunks are validated before one atomic write. `write_file` is intended for new files or deliberate replacement; prefer `apply_patch` for existing code.
+All hunks are validated before one atomic write. `write_file` is intended for new files or deliberate replacement; prefer `apply_patch` for existing code. For generated/source text that is too large for a single MCP request, use the chunked write flow: begin a session, send sequential UTF-8 chunks using the returned byte offset, then commit. Chunks are capped at 512 KiB, sessions expire after ten minutes, total content is capped at 128 MiB, and the target path remains unchanged until the final atomic commit. Optional declared byte length and SHA-256 are verified before replacement.
 
 `exec_command` does not accept a command string, arbitrary arguments, environment variables, or an executable. `kind` is one of `test`, `build`, `lint`, `typecheck`, or `package-script`; the exact resulting package script must appear in that workspace's `allowedScripts`. The service uses `shell: false` at its process boundary, a canonical contained cwd, a sanitized environment, hard timeouts, byte output caps, and process-tree termination. Package scripts are project code, not an OS sandbox.
 

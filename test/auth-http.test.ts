@@ -117,7 +117,7 @@ test("MCP HTTP enforces exact Host/Origin and Bearer authentication", async () =
     try {
       await client.connect(transport);
       const tools = await client.listTools();
-      assert.equal(tools.tools.length, 51);
+      assert.equal(tools.tools.length, 55);
       assert.ok(tools.tools.every((tool) => tool.outputSchema !== undefined));
       const applyPatch = tools.tools.find((tool) => tool.name === "apply_patch");
       assert.equal(applyPatch?.annotations?.destructiveHint, true);
@@ -130,7 +130,7 @@ test("MCP HTTP enforces exact Host/Origin and Bearer authentication", async () =
       ok: true,
       service: "chatgpt-mcp-bridge",
       capabilities: {
-        bridgeCapabilityVersion: 6,
+        bridgeCapabilityVersion: 7,
         codexStateVersion: 4,
         codexModuleModel: "configured-temporary-single-binding",
         codexExecutionTransport: "desktop-ipc",

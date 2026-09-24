@@ -53,6 +53,7 @@ const workspaceConfigSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, "must use letters, numbers, dots, underscores, or hyphens"),
   root: z.string().min(1),
   mode: z.enum(["readonly", "workspace", "trusted-dev", "handoff"]).optional(),
+  maxReadBytes: z.number().int().positive().max(50 * 1024 * 1024).optional(),
   allowedScripts: z.array(
     z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._/-]{0,63}$/, "must be a safe package script name"),
   ).max(64).optional(),
@@ -109,6 +110,7 @@ export interface WorkspaceConfig {
   readonly id: string;
   readonly root: string;
   readonly mode?: WorkspaceMode;
+  readonly maxReadBytes?: number;
   readonly allowedScripts?: readonly string[];
   readonly codex?: CodexWorkspaceConfig;
   readonly mcpServers?: Readonly<Record<string, WorkspaceMcpServerConfig>>;
@@ -159,7 +161,7 @@ export const DEFAULT_CONFIG_FILE = "mcp-bridge.json";
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 3000;
 export const DEFAULT_MCP_PATH = "/mcp";
-export const DEFAULT_MAX_READ_BYTES = 1_048_576;
+export const DEFAULT_MAX_READ_BYTES = 8 * 1024 * 1024;
 export const AUTH_TOKEN_BYTES = 32;
 export const DEFAULT_TUNNEL_HEALTH_URL = "http://127.0.0.1:8080";
 
@@ -270,6 +272,7 @@ export async function loadConfig(
       id: workspace.id,
       root: path.resolve(configDirectory, workspace.root),
       ...(workspace.mode ? { mode: workspace.mode } : {}),
+      ...(workspace.maxReadBytes !== undefined ? { maxReadBytes: workspace.maxReadBytes } : {}),
       ...(workspace.allowedScripts ? { allowedScripts: [...new Set(workspace.allowedScripts)] } : {}),
       ...(workspace.codex ? {
         codex: {

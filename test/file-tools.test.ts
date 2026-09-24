@@ -190,6 +190,64 @@ test("read and atomic write enforce limits and preserve regular files", async ()
   assert.equal((await registry.readFile("demo", "created.txt")).content, "abc");
 });
 
+test("search scans files up to 2 MiB by default and allows bounded per-call overrides", async () => {
+  const { root, registry } = await makeRegistry(4 * 1024 * 1024);
+  const content = `${"x".repeat(600 * 1024)}\nlarge-search-needle\n`;
+  await writeFile(path.join(root, "large-source.ts"), content, "utf8");
+
+  const defaultSearch = await registry.search("demo", "large-search-needle");
+  assert.deepEqual(defaultSearch.results.map((entry) => entry.path), ["large-source.ts"]);
+
+  const smallSearch = await registry.search("demo", "large-search-needle", { maxFileBytes: 512 * 1024 });
+  assert.deepEqual(smallSearch.results, []);
+
+  const explicitSearch = await registry.search("demo", "large-search-needle", { maxFileBytes: 1024 * 1024 });
+  assert.deepEqual(explicitSearch.results.map((entry) => entry.path), ["large-source.ts"]);
+});
+
+test("workspace read-limit override takes precedence over the global limit", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-workspace-override-"));
+  const registry = await WorkspaceRegistry.create({
+    maxReadBytes: 1024,
+    workspaces: [{ id: "demo", root, maxReadBytes: 4096 }],
+  });
+  await writeFile(path.join(root, "large.txt"), "x".repeat(2048), "utf8");
+  const file = await registry.readFile("demo", "large.txt");
+  assert.equal(file.bytes, 2048);
+  assert.equal(registry.listWorkspaces()[0]?.maxReadBytes, 4096);
+});
+
+test("chunked writes keep the target unchanged until atomic commit", async () => {
+  const { root, registry } = await makeRegistry(1024);
+  await writeFile(path.join(root, "large.txt"), "old-content", "utf8");
+  const first = "a".repeat(350 * 1024);
+  const second = "b".repeat(350 * 1024);
+  const complete = first + second;
+  const expectedHash = createHash("sha256").update(complete).digest("hex");
+
+  const upload = await registry.beginChunkedWrite("demo", "large.txt", {
+    totalBytes: Buffer.byteLength(complete),
+    expectedHash,
+  });
+  assert.equal(upload.chunkSize, 512 * 1024);
+  assert.equal(await readFile(path.join(root, "large.txt"), "utf8"), "old-content");
+
+  const one = await registry.writeChunk("demo", upload.uploadId, 0, first);
+  assert.equal(one.bytesReceived, Buffer.byteLength(first));
+  await assert.rejects(
+    registry.writeChunk("demo", upload.uploadId, 0, second),
+    (error: unknown) => error instanceof WorkspaceFileError && error.code === "INVALID_OPERATION",
+  );
+  const two = await registry.writeChunk("demo", upload.uploadId, one.bytesReceived, second);
+  assert.equal(two.bytesReceived, Buffer.byteLength(complete));
+  assert.equal(await readFile(path.join(root, "large.txt"), "utf8"), "old-content");
+
+  const committed = await registry.commitChunkedWrite("demo", upload.uploadId);
+  assert.equal(committed.bytes, Buffer.byteLength(complete));
+  assert.equal(committed.contentHash, expectedHash);
+  assert.equal(await readFile(path.join(root, "large.txt"), "utf8"), complete);
+});
+
 test("workspace copies regular files without overwrite and keeps sandbox boundaries", async () => {
   const { root, registry } = await makeRegistry();
   await mkdir(path.join(root, "src"));

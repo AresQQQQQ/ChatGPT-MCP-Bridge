@@ -51,7 +51,7 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
     client = new Client({ name: "codex-tool-contract", version: "0.1.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`)));
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 62);
+    assert.equal(tools.tools.length, 66);
     const names = new Set(tools.tools.map((tool) => tool.name));
     for (const name of [
       "codex_get_status",
@@ -210,7 +210,40 @@ test("Express endpoint completes MCP handshake and exposes the file tools", asyn
         "stat_files",
         "wait_process",
         "write_file",
+        "write_file_abort",
+        "write_file_begin",
+        "write_file_chunk",
+        "write_file_commit",
       ]);
+
+      const uploadBegin = await client.callTool({
+        name: "write_file_begin",
+        arguments: { workspaceId: "demo", path: "chunked.txt", totalBytes: 11 },
+      });
+      assert.equal(uploadBegin.isError, undefined);
+      const uploadText = uploadBegin.content[0]?.type === "text" ? uploadBegin.content[0].text : "";
+      const uploadId = (JSON.parse(uploadText) as { uploadId: string }).uploadId;
+      const chunkOne = await client.callTool({
+        name: "write_file_chunk",
+        arguments: { workspaceId: "demo", uploadId, offset: 0, content: "hello " },
+      });
+      assert.equal(chunkOne.isError, undefined);
+      const chunkTwo = await client.callTool({
+        name: "write_file_chunk",
+        arguments: { workspaceId: "demo", uploadId, offset: 6, content: "world" },
+      });
+      assert.equal(chunkTwo.isError, undefined);
+      const uploadCommit = await client.callTool({
+        name: "write_file_commit",
+        arguments: { workspaceId: "demo", uploadId },
+      });
+      assert.equal(uploadCommit.isError, undefined);
+      const chunkedRead = await client.callTool({
+        name: "read_file",
+        arguments: { workspaceId: "demo", path: "chunked.txt" },
+      });
+      assert.equal(chunkedRead.isError, undefined);
+      assert.equal(chunkedRead.content[0]?.type === "text" ? chunkedRead.content[0].text : "", "hello world");
 
       const recipeList = await client.callTool({ name: "list_recipes", arguments: { workspaceId: "demo" } });
       assert.equal(recipeList.isError, undefined);

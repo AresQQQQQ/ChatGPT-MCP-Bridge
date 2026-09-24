@@ -14,8 +14,26 @@ test("config loader resolves relative workspace roots from the config directory"
   const config = await loadConfig(configPath);
   assert.equal(config.host, "127.0.0.1");
   assert.equal(config.port, 3000);
+  assert.equal(config.maxReadBytes, 8 * 1024 * 1024);
   assert.equal(config.workspaces[0]?.root, path.join(tempRoot, "workspace"));
   assert.equal(config.workspaces[0]?.mode, "readonly");
+});
+
+test("config loader accepts per-workspace read-limit overrides", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-workspace-limit-"));
+  const configPath = path.join(tempRoot, "bridge.json");
+  await writeFile(configPath, JSON.stringify({
+    maxReadBytes: 8 * 1024 * 1024,
+    workspaces: [
+      { id: "normal", root: "." },
+      { id: "large", root: ".", maxReadBytes: 32 * 1024 * 1024 },
+    ],
+  }), "utf8");
+
+  const config = await loadConfig(configPath);
+  assert.equal(config.maxReadBytes, 8 * 1024 * 1024);
+  assert.equal(config.workspaces[0]?.maxReadBytes, undefined);
+  assert.equal(config.workspaces[1]?.maxReadBytes, 32 * 1024 * 1024);
 });
 
 test("config loader resolves a local tunnel client and applies its loopback health default", async () => {
