@@ -3,14 +3,19 @@ setlocal
 
 set "BRIDGE_ROOT=%~dp0"
 set "BRIDGE_NODE=node"
-where node >nul 2>nul
-if errorlevel 1 (
-  set "BRIDGE_NODE=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-  if not exist "%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" (
-    echo Node.js runtime was not found.
-    echo Install Node.js 22 or make sure the bundled runtime is available.
-    pause
-    exit /b 1
+if exist "%~dp0runtime\node.exe" (
+  set "PATH=%~dp0runtime;%PATH%"
+  set "BRIDGE_NODE=%~dp0runtime\node.exe"
+) else (
+  where node >nul 2>nul
+  if errorlevel 1 (
+    set "BRIDGE_NODE=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
+    if not exist "%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" (
+      echo Node.js runtime was not found.
+      echo Install Node.js 22 or make sure the bundled runtime is available.
+      pause
+      exit /b 1
+    )
   )
 )
 
