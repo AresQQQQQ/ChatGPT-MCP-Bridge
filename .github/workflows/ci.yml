@@ -67,5 +67,7 @@ jobs:
         run: pnpm test
       - name: Build TypeScript
         run: pnpm build
+      - name: Validate macOS updater shell syntax
+        run: zsh -n update-bridge.command
       - name: Build native macOS UI
         run: pnpm run ui:build

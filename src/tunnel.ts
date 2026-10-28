@@ -91,7 +91,7 @@ export async function launchTunnel(
   options: LaunchTunnelOptions = {},
 ): Promise<ManagedTunnel> {
   if (await isAlreadyReady(config.healthUrl)) {
-    return { reused: true, close: async () => {} };
+    throw new Error("Tunnel health endpoint is already READY, but this process cannot verify that it belongs to the configured Tunnel profile. Refusing to reuse or terminate an unknown Tunnel; stop the intended local Tunnel or choose a dedicated health port.");
   }
 
   const spec = buildTunnelSpawnSpec(config, auth);
