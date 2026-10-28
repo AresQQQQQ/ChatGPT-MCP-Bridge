@@ -77,3 +77,15 @@ test("workspace config rejects duplicate ids, invalid ids, missing folders, and 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("workspace config refuses a stale expected document without overwriting it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bridge-workspace-cas-"));
+  try {
+    const configPath = path.join(root, "mcp-bridge.json");
+    const original = JSON.stringify({ workspaces: [{ id: "mac", root }] });
+    const updated = JSON.stringify({ workspaces: [{ id: "mac", root }], changedElsewhere: true });
+    await writeFile(configPath, updated);
+    await assert.rejects(writeWorkspaceConfig(configPath, [{ originalId: "mac", id: "renamed", root, mode: "workspace" }], original), /其他程序修改/);
+    assert.equal(await readFile(configPath, "utf8"), updated);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

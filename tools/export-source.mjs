@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 const root = await realpath(fileURLToPath(new URL("../", import.meta.url)));
 const rootFiles = new Set([
   ".env.example", ".gitignore", ".npmrc", "README.md", "LICENSE", "LICENSE.md",
-  "bridge.cmd", "bridge-ui.cmd", "setup.cmd", "package.json", "pnpm-lock.yaml",
-  "pnpm-workspace.yaml", "tsconfig.json", "tools/export-source.mjs",
+  "bridge.cmd", "bridge-ui.cmd", "bridge.command", "bridge-ui.command", "setup.cmd", "package.json", "pnpm-lock.yaml",
+  "pnpm-workspace.yaml", "tsconfig.json", "tools/export-source.mjs", "tools/build-mac-ui.mjs",
 ]);
 const listed = execFileSync("git", [
   "ls-files", "--cached", "--others", "--exclude-standard", "-z",

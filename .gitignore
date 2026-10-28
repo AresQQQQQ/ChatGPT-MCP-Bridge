@@ -40,3 +40,14 @@ mediatest/
 # Local Codex Desktop reverse-engineering/probe corpus; useful for maintenance,
 # but version-specific and far too large/noisy for the project history.
 tools/codex-desktop-probe/
+
+# macOS local metadata.
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+
+# Finder-visible link to the locally built native Mac app.
+/ChatGPT MCP Bridge.app

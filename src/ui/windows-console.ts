@@ -1078,7 +1078,7 @@ function parseWorkspacePayload(value: unknown): EditableWorkspace[] {
 }
 
 export async function launchLocalControlUi(configPath = path.resolve(process.cwd(), DEFAULT_CONFIG_FILE)): Promise<LocalControlUi> {
-  if (process.platform !== "win32") throw new Error("本地控制台 UI 当前仅支持 Windows");
+  if (process.platform !== "win32") throw new Error("图形控制台目前仅支持 Windows。\nmacOS 请使用 bridge.command 或 pnpm start。");
   await Promise.all(UI_LOGO_FILES.map(async (fileName) => {
     const filePath = path.join(UI_ASSET_ROOT, fileName);
     const info = await stat(filePath).catch(() => undefined);

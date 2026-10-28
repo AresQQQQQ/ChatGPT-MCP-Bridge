@@ -120,11 +120,12 @@ export async function readWorkspaceConfig(configPath: string): Promise<Workspace
   return { workspaces, key: content };
 }
 
-export async function writeWorkspaceConfig(configPath: string, requested: readonly EditableWorkspace[]): Promise<void> {
+export async function writeWorkspaceConfig(configPath: string, requested: readonly EditableWorkspace[], expectedContent?: string): Promise<void> {
   const validated = validateWorkspaceInput(requested, configPath);
   await ensureWorkspaceRoots(validated);
 
   const content = await readFile(configPath, "utf8");
+  if (expectedContent !== undefined && content !== expectedContent) throw new Error("配置已被其他程序修改，请重新载入");
   const config = parseRawConfig(content, configPath);
   const existing = rawWorkspaces(config, configPath);
   const byId = new Map<string, RawWorkspace>();
@@ -160,6 +161,7 @@ export async function writeWorkspaceConfig(configPath: string, requested: readon
     } finally {
       await handle.close();
     }
+    if (await readFile(configPath, "utf8") !== content) throw new Error("配置已被其他程序修改，请重新载入");
     await rename(temporaryPath, configPath);
   } finally {
     await unlink(temporaryPath).catch(() => undefined);

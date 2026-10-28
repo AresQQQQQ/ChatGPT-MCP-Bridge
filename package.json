@@ -14,7 +14,8 @@
     "dist",
     "assets/icons",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "assets/mac-console"
   ],
   "scripts": {
     "setup": "tsx src/cli.ts setup",
@@ -26,7 +27,8 @@
     "dev": "tsx src/cli.ts serve",
     "bridge": "tsx src/cli.ts start",
     "ui": "tsx src/cli.ts ui",
-    "start": "node dist/cli.js start"
+    "start": "node dist/cli.js start",
+    "ui:build": "pnpm build && node tools/build-mac-ui.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

@@ -23,7 +23,7 @@ import {
 } from "./commands/index.js";
 import { WorkspaceRegistry } from "./workspaces/workspace-registry.js";
 import { BridgeController, listenBridge } from "./control/bridge-controller.js";
-import { launchLocalControlUi } from "./ui/windows-console.js";
+import { launchControlUi } from "./ui/control-console.js";
 import { runSetupWizard } from "./setup/wizard.js";
 
 interface CliOptions {
@@ -209,8 +209,8 @@ async function serve(options: CliOptions): Promise<number> {
 }
 
 async function ui(options: CliOptions): Promise<number> {
-  const controlUi = await launchLocalControlUi(options.configPath);
-  console.log("MCP Bridge 本地控制台已打开。关闭窗口或按 Ctrl+C 可退出控制台并停止其管理的 Bridge/Tunnel。");
+  const controlUi = await launchControlUi(options.configPath);
+  console.log("MCP Bridge 本地控制台已打开。关闭应用窗口或按 Ctrl+C 可退出控制台并停止其管理的 Bridge/Tunnel。");
   let stopping = false;
   const shutdown = async (): Promise<void> => {
     if (stopping) return;
@@ -235,13 +235,6 @@ async function start(options: CliOptions): Promise<number> {
     },
     { loadConfig: async (configPath) => withRuntimeOverrides(await loadConfig(configPath), options) },
   );
-  await controller.start();
-  for (const entry of controller.getLogs()) {
-    const writer = entry.stream === "stderr" ? console.error : console.log;
-    writer(entry.message);
-  }
-  console.log("Press Ctrl+C to stop both services.");
-
   const shutdown = async (exitCode: number): Promise<void> => {
     if (stopping) return;
     stopping = true;
@@ -250,6 +243,15 @@ async function start(options: CliOptions): Promise<number> {
   };
   process.once("SIGINT", () => void shutdown(0));
   process.once("SIGTERM", () => void shutdown(0));
+  // Register before asynchronous startup: POSIX Tunnel children are detached.
+  try { await controller.start(); }
+  catch (error) { if (!stopping) throw error; }
+  if (stopping) return 0;
+  for (const entry of controller.getLogs()) {
+    const writer = entry.stream === "stderr" ? console.error : console.log;
+    writer(entry.message);
+  }
+  console.log("Press Ctrl+C to stop both services.");
 
   return 0;
 }

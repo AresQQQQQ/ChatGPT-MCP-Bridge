@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatGPT MCP Bridge</title><link rel="stylesheet" href="/ui.css"><script src="/ui.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><img src="/icons/chatgpt-mcp-bridge.png" alt="" width="38" height="38"><div><h1>ChatGPT MCP Bridge</h1><p>本机项目，与 ChatGPT 保持连接。</p></div></div>
+  <div class="toolbar"><button id="restart" class="icon-button" title="重新启动 Bridge 与 Tunnel" aria-label="重新启动">↻</button><button id="stop">停止</button><button id="start" class="primary">▶ 启动服务</button></div>
+</header>
+<main>
+  <section class="connection panel" aria-label="连接链路">
+    <div class="section-heading"><h2>连接链路</h2><div class="service-meta"><span id="lifecycle" class="badge">正在连接控制台</span><span id="runtime-meta"></span></div></div>
+    <div class="chain" id="chain"></div><div id="service-error" class="error-message" hidden></div>
+  </section>
+  <section class="workspace-layout">
+    <aside class="sidebar panel" aria-label="项目与 Module">
+      <div class="sidebar-heading"><h2>项目 / Module</h2><button id="add" class="icon-button" aria-label="添加项目" title="添加项目">＋</button></div>
+      <div class="search"><span aria-hidden="true">⌕</span><input id="workspace-search" type="search" aria-label="搜索项目" placeholder="查找项目或 Module"></div>
+      <nav id="tree" aria-label="项目列表"></nav>
+      <div class="sidebar-footer"><span id="workspace-count">— 个项目</span><span class="local-indicator"><i></i> 仅本机</span></div>
+    </aside>
+    <section class="inspector panel" aria-label="项目详情">
+      <div class="inspector-heading"><div><div class="eyebrow" id="selection-kind">WORKSPACE</div><h2 id="selection-title">正在载入项目</h2><p id="selection-subtitle">查看配置与连接状态</p></div><span id="selection-mode" class="badge"></span></div>
+      <div class="tabs" role="tablist" aria-label="项目内容"><button id="details-tab" role="tab" aria-selected="true">项目详情</button><button id="mcps-tab" role="tab" aria-selected="false">本地 MCP <span id="mcp-count">0</span></button></div>
+      <div class="inspector-body"><div id="details" role="tabpanel" aria-labelledby="details-tab"></div><div id="mcps" role="tabpanel" aria-labelledby="mcps-tab" hidden></div></div>
+    </section>
+  </section>
+  <section class="logs panel" aria-label="运行日志">
+    <div class="log-heading"><div class="log-title"><h2>运行日志</h2><span id="log-count">0 条</span></div><div class="log-tools"><label><input id="follow" type="checkbox" checked> 自动滚动</label><button id="copy-logs" class="text-button">复制日志</button><button id="clear-logs" class="text-button">清空视图</button></div></div>
+    <div class="log-filters"><div class="segmented" aria-label="日志来源"><button data-source="all" aria-pressed="true">全部</button><button data-source="bridge" aria-pressed="false">Bridge</button><button data-source="tunnel" aria-pressed="false">Tunnel</button><button data-source="controller" aria-pressed="false">控制台</button></div><input id="log-search" type="search" aria-label="筛选日志" placeholder="筛选日志内容"></div>
+    <div id="log-scroll" tabindex="0" aria-label="日志内容"><div id="log-lines"></div><div id="log-empty" class="empty-log"><span>◌</span><p>服务启动后，运行日志会显示在这里。</p></div></div>
+  </section>
+</main>
+<footer><span id="footer-status">正在载入本机控制台…</span><span>关闭应用窗口会停止它管理的服务</span></footer>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div class="dialog-actions"><button value="cancel">取消</button><button value="confirm" class="danger">确认</button></div></form></dialog>
+</body></html>
