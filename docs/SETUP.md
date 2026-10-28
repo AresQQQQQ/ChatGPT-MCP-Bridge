@@ -40,6 +40,92 @@ Copy-Item .env.example .env
 
 Bridge 会自动把本地 Bearer 认证头传给隧道客户端。等待 Bridge 与 Tunnel 两个 `READY` 状态，并保持进程运行。也可用 `.\bridge-ui.cmd` 打开 Windows 控制窗口。
 
+## macOS Apple Silicon
+
+Mac 版源码位于 `feat/macos-arm64` 分支。在 Mac 本地 SSD 上 clone 该分支，不在 SMB 共享盘运行依赖、Git 或 Tunnel：
+
+```sh
+git clone --branch feat/macos-arm64 https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
+cd ChatGPT-MCP-Bridge
+pnpm install --frozen-lockfile
+pnpm build
+pnpm run setup
+node dist/cli.js doctor
+./bridge.command
+```
+
+Node 需要 22+。首次安装还应确认 pnpm 在普通 Terminal 中可用；如果只有 Codex 附带 pnpm，Finder 的登录 shell 无法发现它。本机已使用以下命令安装同版本到 Node 的标准全局位置，再从 Finder 启动的实例完成 package script 验证：
+
+```sh
+npm install -g pnpm@11.19.0
+```
+
+运行时通过 `process.execPath` 与登录 shell 的 PATH 发现。Apple Silicon Homebrew 的 `/opt/homebrew/bin` 场景已验证，不要求固定用户名或唯一安装目录。Finder 启动使用登录 shell；如果 shell 中未配置 Node，启动入口会给出明确提示。
+
+向导输入已有 Tunnel ID 和 Runtime API key，健康端口可以选 `8081`。当前统一 profile 名为 `bridge`，由官方 `init --profile-dir` 在 `.mcp-bridge-state/tunnel-setup-*/profiles/bridge.yaml` 中生成；这是现有项目的隔离 profile 模型，并非 Windows profile 副本。ID 仅保存于这个本机 profile，key 保存于 `.env`；profile 通过 `env:CONTROL_PLANE_API_KEY` 引用 key。不要把共享鉴权文件复制到仓库中。
+
+调整 `mcp-bridge.json` 的 `workspaces` 到实际绝对路径；启用 trusted-dev 时，Bridge 以本机当前用户运行开发命令。Bridge 项目自身的有效脚本是 `test`、`build`、`typecheck`。
+
+停止使用 Ctrl+C；`pnpm start` 仍是标准组合启动方法。Windows 的三个 `.cmd` 启动入口与 WPF 控制台继续保留。Mac 图形控制台见下节。
+
+本机健康检查：
+
+```sh
+curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:8081/readyz
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+安装器保留官方 GitHub origin、release download 路径、150 MiB ZIP 大小上限、bounded download 与 SHA-256 校验。macOS 使用系统 `/usr/bin/unzip` 读取唯一的固定文件名，输出大小受限，不让 ZIP 路径或符号链接决定安装路径；两个二进制设为 `0700`，清单为 `0600`。Windows 继续使用原 PowerShell ZIP 提取流程。
+
+### Mac mini 实测记录（2026-10-03）
+
+macOS 26.6.1 / arm64，Node v26.0.0，pnpm 11.19.0，Git 2.50.1。起点为 `bf1f502`。官方 Tunnel Client v0.0.15，asset 为 `tunnel-client-v0.0.15-darwin-arm64.zip`（27,018,754 字节），SHA-256：`b2cae3aa9df45b4c2fe9b1d700ebacce39f9feb6a6b46b86e6499f9a51bf72ff`。客户端与附带 cloudflared 均为 Mach-O arm64。首轮平台适配的 `pnpm typecheck/test/build` 均通过；145 个测试中 137 通过、8 个原有 Windows 专属测试跳过、0 失败。
+
+实际完成交互式 `pnpm run setup`，使用原 Tunnel 和原 Runtime key，未创建新 Tunnel。本机 profile 为 `bridge`、健康端口为 8081。Bridge 与 Tunnel READY，`/health` 返回 `ok: true` 和 `bridgeCapabilityVersion: 7`；认证后的 MCP initialize 与 tools/list 返回 55 个工具，基础工作区/文件/Git、package script、trusted-dev 原生命令和四个分块写入工具均实际调用通过。
+
+已实测 Finder 双击 `bridge.command`、从其他目录启动、启动期间与 READY 后的 SIGINT、SIGTERM、controller stop/restart、Tunnel 意外退出后的清理与再启动；这些路径关闭端口且没有孤儿 tunnel-client。`SIGKILL`、操作系统崩溃等无法运行进程内清理的情况不属于上述验证，强制终止后应检查残留进程。
+
+ChatGPT 现有 `MCP Bridge Web Test App` 已刷新到本机的 55 个工具（Write 26 / Read 29），包含四个 v7 分块写入工具；使用同一个 Tunnel 完成远端工具发现，没有创建新应用或新 Tunnel。
+
+Windows 的安装路径选择测试继续通过，Windows 三个启动脚本及 WPF 实现保留；当前 Mac 未执行 Windows 系统上的原生运行验证。Codex Desktop 的 Windows IPC 和 Windows 进程检查工具未在 Mac 上验证，不因平台安装适配而改变这些功能。
+
+## Mac 图形控制台
+
+Mac UI 使用 AppKit 原生窗口、系统 WebKit 和已有 Node/TypeScript 控制层，复用 Windows UI 的 BridgeController、工作区配置、Codex 绑定及本地 MCP 操作。未引入第三方桌面运行时。
+
+显式构建需要 Xcode Command Line Tools（提供 swiftc、macOS SDK），启动已有应用不调用该工具链。构建和运行分别执行：
+
+```sh
+# 构建 TypeScript、Mac app、图标和 ad-hoc 签名：
+pnpm run ui:build
+# 只启动已有应用（以下任选其一）：
+pnpm run ui
+./bridge-ui.command
+node dist/cli.js ui
+```
+
+运行入口不执行 tsc、swiftc、codesign 或构建脚本，也不根据源码 mtime 自动重建。应用可执行文件或 Node host 产物缺失时快速失败，提示“Mac 控制台尚未构建，请先运行 pnpm run ui:build。”源码修改后是否重建由用户明确执行 `ui:build` 决定。
+
+构建产物实际位于 `.mcp-bridge-state/ChatGPT MCP Bridge.app`，项目根目录创建同名 Finder 可见链接；两者都 Git ignored。应用带有本机 ad-hoc 签名和图标，不是已公证的分发安装包。Finder 双击应用可直接打开独立窗口，不需要 Terminal 保持运行。首次会通过原生文件夹选择器确认此 Bridge 项目目录并保存目录访问书签，避免 Documents 目录权限阻塞启动；不请求完整磁盘访问。重新构建前先退出应用，避免运行期间改变签名。Node/依赖/构建产物仍在本机项目目录中；移动目录后重新执行构建。
+
+- **连接链路：** ChatGPT、Tunnel、MCP、Bridge 与 Codex 状态，以及 PID、端口和启动时间。ChatGPT 节点表示 Tunnel 已就绪，不代表检测到了某个具体聊天正在调用。
+- **服务：** 启动、停止和重新启动，⌘R 启动、⌘. 停止，⌘Q 或关闭窗口退出；⌘⇧R 重新载入控制台。
+- **项目：** 项目/Module 选择、搜索、添加/移除配置、编辑 ID/路径/权限、原生 NSOpenPanel 文件夹选择。保存只在服务停止时允许，保留其他配置字段，并拒绝覆盖已被其他程序修改的配置。
+- **Codex：** 显示当前绑定、长期/临时 Module、Thread 与 Desktop Owner，提供刷新和解除绑定。解除绑定保留对话。当前本机工作区未启用 Codex，这部分未做真实 Desktop IPC 操作验证。
+- **本地 MCP：** 显示配置服务、加载状态、检测结果，支持检测、加载、卸载。检测/卸载/重新加载已通过临时回环 MCP 服务实际验证，测试配置随后清除。
+- **日志：** 实时更新、来源/文本筛选、自动滚动、复制与清空视图；保留后端日志，显示内容已脱敏。浅色/深色样式随系统偏好，深色视觉尚未在本机切换系统外观实测。
+
+控制 HTTP 监听器只绑定 `127.0.0.1` 的随机端口，使用每次启动随机凭据、固定 Host/Origin 检查、严格动作 schema 与 CSP；不提供通用命令执行接口。界面快照不包含 `.env`、原始配置或 Tunnel profile。WebKit 只允许当前回环 origin 的页面导航，原生文件夹选择消息仅接受主页面。
+
+应用通过 stdin pipe 拥有 Node 控制进程；正常退出会等待服务清理，原生父进程退出导致 pipe EOF 时也会停止服务。已实测原生窗口中的启动/停止/重启、配置保存、文件夹选择与 ⌘Q 清理；自动测试覆盖 pipe EOF 清理。操作系统崩溃或直接 SIGKILL Node 控制进程不保证执行进程内清理。
+
+最终 Mac UI 验证：153 个测试中 145 通过、8 个原有 Windows 专属测试跳过、0 失败；typecheck、build、原生 arm64 编译与签名校验通过。Finder 首次确认目录及随后复用目录书签的启动均已实测；最终 Finder 实例再次通过认证 MCP initialize/tools/list 和工作区、Git、package script、trusted-dev、分块写入调用。
+
+UI 打开时默认处于停止状态，先点击“启动服务”。应用不接管其他实例拥有的服务。若端口已被占用，先退出旧 Terminal 或 UI；不要同时启动多份 Bridge。关闭图形应用后仍可使用原有 `bridge.command` / `pnpm start`。
+
 ## 本机文件与重新配置
 
 | 本机位置 | 内容 |
