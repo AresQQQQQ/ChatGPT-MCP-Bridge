@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
 import net, { type Socket } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import { CodexDesktopIpcClient } from "../src/codex/codex-desktop.js";
@@ -48,8 +51,11 @@ async function waitFor<T>(read: () => T | undefined, timeoutMs = 2_000): Promise
   assert.fail("timed out waiting for Codex Desktop IPC test event");
 }
 
-test("Codex Desktop IPC uses official v2 start-turn framing and observes real turnHistory completion patches", { skip: process.platform !== "win32" }, async () => {
-  const pipePath = `\\\\.\\pipe\\mcp-bridge-codex-test-${process.pid}-${randomUUID()}`;
+test("Codex Desktop IPC uses official v2 start-turn framing and observes real turnHistory completion patches", { skip: process.platform !== "win32" && process.platform !== "darwin" }, async () => {
+  const socketRoot = process.platform === "darwin" ? await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-codex-ipc-")) : undefined;
+  const pipePath = process.platform === "win32"
+    ? `\\\\.\\pipe\\mcp-bridge-codex-test-${process.pid}-${randomUUID()}`
+    : path.join(socketRoot!, "ipc.sock");
   const observed: Frame[] = [];
   let completionText: string | undefined;
 
@@ -228,5 +234,6 @@ test("Codex Desktop IPC uses official v2 start-turn framing and observes real tu
     unsubscribe();
     await client.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (socketRoot) await rm(socketRoot, { recursive: true, force: true });
   }
 });

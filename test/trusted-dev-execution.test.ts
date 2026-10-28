@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -27,7 +27,7 @@ async function waitForFile(filePath: string, timeoutMs = 3_000): Promise<void> {
 }
 
 test("TrustedDevCommandRunner preserves developer context, strips Bridge secrets, and respects cwd", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-trusted-dev-exec-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-trusted-dev-exec-")));
   const nested = path.join(root, "nested");
   await mkdir(nested);
   const previousControlPlane = process.env.CONTROL_PLANE_API_KEY;
@@ -77,7 +77,7 @@ test("TrustedDevCommandRunner preserves developer context, strips Bridge secrets
 });
 
 test("TrustedDevCommandRunner enforces timeout", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-trusted-dev-timeout-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-trusted-dev-timeout-")));
   try {
     const result = await new TrustedDevCommandRunner().run({
       type: "exec",
@@ -92,7 +92,7 @@ test("TrustedDevCommandRunner enforces timeout", async () => {
 });
 
 test("TrustedDevCommandRunner supports explicit Windows shell execution", { skip: process.platform !== "win32" }, async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-trusted-dev-shell-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-trusted-dev-shell-")));
   try {
     const cmdResult = await new TrustedDevCommandRunner().run({
       type: "shell",
@@ -115,7 +115,7 @@ test("TrustedDevCommandRunner supports explicit Windows shell execution", { skip
 });
 
 test("DesktopAppLauncher returns promptly while the launched process continues independently", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-desktop-launch-"));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-desktop-launch-")));
   const marker = path.join(root, "launched.txt");
   try {
     const code = "setTimeout(() => require('node:fs').writeFileSync(process.argv[1], 'desktop-ok'), 200); setTimeout(() => {}, 450)";

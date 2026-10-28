@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify, parseEnv } from "node:util";
 import { configFileTemplate, isLoopbackUrl, loadConfig } from "../config.js";
@@ -11,11 +11,13 @@ const MAX_ARCHIVE = 150 * 1024 * 1024;
 interface Asset { name: string; size: number; digest: string; browser_download_url: string }
 export interface Release { tag_name: string; assets: Asset[] }
 
-export function selectAsset(release: Release, arch: string): Asset {
+export function selectAsset(release: Release, arch: string, platform: string = "win32"): Asset {
   const platformArch = arch === "x64" ? "amd64" : arch === "arm64" ? "arm64" : undefined;
-  if (!platformArch) throw new Error("自动安装仅支持 Windows x64 / ARM64。");
+  if (!platformArch || (platform !== "win32" && !(platform === "darwin" && arch === "arm64"))) {
+    throw new Error("自动安装仅支持 Windows x64 / ARM64 和 macOS Apple Silicon / ARM64。");
+  }
   if (!/^v[0-9][A-Za-z0-9._-]*$/.test(release.tag_name)) throw new Error("官方版本信息无效。");
-  const asset = release.assets.find(item => item.name === `tunnel-client-${release.tag_name}-windows-${platformArch}.zip`);
+  const asset = release.assets.find(item => item.name === `tunnel-client-${release.tag_name}-${platform === "win32" ? "windows" : "darwin"}-${platformArch}.zip`);
   if (!asset || !/^sha256:[a-f0-9]{64}$/.test(asset.digest) || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ARCHIVE) {
     throw new Error("官方发布缺少适用的 ZIP 或 SHA-256 校验值，已停止安装。");
   }
@@ -50,18 +52,20 @@ export function verifyArchive(data: Buffer, asset: Asset): void {
 }
 
 export async function installTunnelClient(directory: string, progress: (message: string) => void): Promise<string> {
-  if (process.platform !== "win32") throw new Error("自动安装目前仅支持 Windows；其他系统请手动配置客户端。");
+  if (process.platform !== "win32" && !(process.platform === "darwin" && process.arch === "arm64")) {
+    throw new Error("自动安装仅支持 Windows x64 / ARM64 和 macOS Apple Silicon / ARM64。");
+  }
   progress("正在查询 openai/tunnel-client 官方版本…");
   const metadata = await readBounded(await fetch(RELEASE_URL, {
     headers: { "User-Agent": "ChatGPT-MCP-Bridge", Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(30_000),
   }), 2 * 1024 * 1024);
   const release = JSON.parse(metadata.toString("utf8")) as Release;
-  const asset = selectAsset(release, process.arch);
+  const asset = selectAsset(release, process.arch, process.platform);
   progress(`正在下载 ${asset.name}…`);
   const bytes = await readBounded(await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(180_000) }), asset.size);
   verifyArchive(bytes, asset);
   const archive = path.join(directory, "client.zip");
-  const executable = path.join(directory, "tunnel-client.exe");
+  const executable = path.join(directory, process.platform === "win32" ? "tunnel-client.exe" : "tunnel-client");
   await writeFile(archive, bytes, { flag: "wx", mode: 0o600 });
   // Extract only the executable into an exact destination: no ZIP entry controls a filesystem path.
   const script = `Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -71,13 +75,49 @@ try {
   if ($entries.Count -ne 1 -or $entries[0].Length -gt 209715200) { throw 'Invalid client archive' }
   [IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $env:BRIDGE_SETUP_EXECUTABLE, $false)
 } finally { $zip.Dispose() }`;
-  await runQuiet("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+  if (process.platform === "win32") await runQuiet("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
     BRIDGE_SETUP_ARCHIVE: archive, BRIDGE_SETUP_EXECUTABLE: executable,
   });
+  else await extractDarwinArchive(archive, directory);
+  const info = await lstat(executable);
+  if (!info.isFile()) throw new Error("安装结果不是正规客户端文件。");
   await rm(archive);
   await writeFile(path.join(directory, "release.json"), JSON.stringify({ version: release.tag_name, asset: asset.name, digest: asset.digest }, null, 2));
   progress("客户端下载与 SHA-256 校验完成。");
   return executable;
+}
+
+const DARWIN_ENTRIES = ["tunnel-client", "cloudflared", "cloudflared-manifest.json"] as const;
+
+export function validateDarwinEntries(listing: string): void {
+  const entries = listing.split(/\r?\n/u);
+  if (DARWIN_ENTRIES.some(name => entries.filter(entry => entry === name).length !== 1)) {
+    throw new Error("客户端 ZIP 缺少唯一的 macOS 运行文件。");
+  }
+}
+
+export async function extractDarwinArchive(archive: string, directory: string): Promise<void> {
+  const env = { ...process.env };
+  delete env.CONTROL_PLANE_API_KEY;
+  delete env.MCP_EXTRA_HEADERS;
+  delete env.MCP_DISCOVERY_EXTRA_HEADERS;
+  try {
+    const options = { shell: false as const, timeout: 30_000, env };
+    const listing = await exec("/usr/bin/unzip", ["-Z", "-1", archive], { ...options, maxBuffer: 1024 * 1024 });
+    validateDarwinEntries(listing.stdout);
+    // Stream exact entries to bounded buffers, never extract archive paths or symlinks.
+    for (const name of DARWIN_ENTRIES) {
+      const limit = name.endsWith(".json") ? 64 * 1024 : 200 * 1024 * 1024;
+      const { stdout } = await exec("/usr/bin/unzip", ["-p", archive, name], { ...options, encoding: "buffer", maxBuffer: limit });
+      if (stdout.length === 0) throw new Error("Empty runtime entry");
+      const target = path.join(directory, name);
+      await writeFile(target, stdout, { flag: "wx", mode: name.endsWith(".json") ? 0o600 : 0o700 });
+      if (!(await lstat(target)).isFile()) throw new Error("Invalid runtime file");
+      if (!name.endsWith(".json")) await chmod(target, 0o700);
+    }
+  } catch {
+    throw new Error("macOS 客户端解压失败；请检查官方 ZIP、大小限制和目录权限。");
+  }
 }
 
 async function runQuiet(executable: string, args: string[], extraEnv: NodeJS.ProcessEnv = {}): Promise<void> {

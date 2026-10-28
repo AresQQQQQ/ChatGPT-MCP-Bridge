@@ -34,7 +34,7 @@ test("installer rejects oversized and failed HTTP responses", async () => {
 test("runtime key replacement retains parsed env values and removes duplicate assignments", () => {
   const env = 'OTHER="first\nsecond"\nCONTROL_PLANE_API_KEY=old\nCONTROL_PLANE_API_KEY=shadow\n';
   const changed = updateRuntimeKey(env, "new-test-key");
-  assert.deepEqual(parseEnv(changed), { OTHER: "first\nsecond", CONTROL_PLANE_API_KEY: "new-test-key" });
+  assert.deepEqual({ ...parseEnv(changed) }, { OTHER: "first\nsecond", CONTROL_PLANE_API_KEY: "new-test-key" });
   assert.equal((changed.match(/CONTROL_PLANE_API_KEY=/g) ?? []).length, 1);
   assert.throws(() => updateRuntimeKey(env, "invalid\nKEY=value"));
 });
@@ -69,7 +69,7 @@ test("setup preserves workspaces and auth, isolates profiles, and keeps keys out
   assert.ok(raw.tunnel.profileDir.startsWith(path.join(f.root, ".mcp-bridge-state")));
   assert.ok(args.includes(raw.tunnel.profileDir));
   assert.doesNotMatch(args.join(" ") + logs.join(" "), /new-test-key|old-test-key/);
-  assert.deepEqual(parseEnv(await readFile(path.join(f.root, ".env"), "utf8")), { CONTROL_PLANE_API_KEY: "new-test-key", OTHER: "keep" });
+  assert.deepEqual({ ...parseEnv(await readFile(path.join(f.root, ".env"), "utf8")) }, { CONTROL_PLANE_API_KEY: "new-test-key", OTHER: "keep" });
   const loaded = await loadConfig(f.configPath);
   assert.ok(loaded.tunnel);
   assert.deepEqual(buildTunnelSpawnSpec(loaded.tunnel, loaded.auth).args,
@@ -115,4 +115,56 @@ test("invalid tunnel ID, key and colliding port fail before invoking installer",
   await assert.rejects(setupTunnel({ ...f.input, tunnelId: "bad id" }, deps));
   await assert.rejects(setupTunnel({ ...f.input, runtimeKey: "bad\nkey" }, deps));
   await assert.rejects(setupTunnel({ ...f.input, healthPort: 3000 }, deps), /不能与 Bridge/);
+});
+
+test("installer selects darwin arm64 explicitly without changing Windows assets", () => {
+  const mac = { ...asset, name: "tunnel-client-v1.0.0-darwin-arm64.zip" };
+  const release = { tag_name: "v1.0.0", assets: [asset, mac] };
+  assert.equal(selectAsset(release, "arm64", "darwin"), mac);
+  assert.equal(selectAsset(release, "x64", "win32"), asset);
+  assert.throws(() => selectAsset(release, "x64", "darwin"));
+  assert.throws(() => selectAsset(release, "arm64", "linux"));
+  assert.throws(() => selectAsset({ ...release, assets: [{ ...mac, digest: "" }] }, "arm64", "darwin"));
+});
+
+test("macOS ZIP requires unique exact runtime entries and ignores archive-controlled paths", async () => {
+  const installer = await import("../src/setup/tunnel-setup.js");
+  assert.equal(typeof installer.validateDarwinEntries, "function");
+  const names = ["tunnel-client", "cloudflared", "cloudflared-manifest.json"];
+  assert.doesNotThrow(() => installer.validateDarwinEntries([...names, "../../outside", "LICENSE"].join("\n")));
+  assert.throws(() => installer.validateDarwinEntries([...names, "tunnel-client"].join("\n")));
+  assert.throws(() => installer.validateDarwinEntries(names.slice(1).join("\n")));
+  assert.throws(() => installer.validateDarwinEntries(names.map(n => `nested/${n}`).join("\n")));
+});
+
+test("macOS extraction writes only fixed regular files with executable permissions", { skip: process.platform !== "darwin" }, async t => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { mkdir, stat } = await import("node:fs/promises");
+  const installer = await import("../src/setup/tunnel-setup.js");
+  assert.equal(typeof installer.extractDarwinArchive, "function");
+  const f = await fixture(t);
+  const source = path.join(f.root, "zip-source");
+  const destination = path.join(f.root, "installed");
+  await mkdir(source); await mkdir(destination);
+  for (const name of ["tunnel-client", "cloudflared", "cloudflared-manifest.json", "unexpected"]) {
+    await writeFile(path.join(source, name), name);
+  }
+  const archive = path.join(f.root, "client.zip");
+  await promisify(execFile)("/usr/bin/zip", ["-q", archive, "tunnel-client", "cloudflared", "cloudflared-manifest.json", "unexpected"], { cwd: source });
+  await installer.extractDarwinArchive(archive, destination);
+  assert.deepEqual((await readdir(destination)).sort(), ["cloudflared", "cloudflared-manifest.json", "tunnel-client"]);
+  for (const name of ["tunnel-client", "cloudflared"]) {
+    const info = await stat(path.join(destination, name));
+    assert.ok(info.isFile()); assert.equal(info.mode & 0o777, 0o700);
+    assert.equal(await readFile(path.join(destination, name), "utf8"), name);
+  }
+  await assert.rejects(installer.extractDarwinArchive(archive, destination), /解压/);
+  const bounded = path.join(f.root, "bounded");
+  await mkdir(bounded);
+  await writeFile(path.join(source, "cloudflared-manifest.json"), "x".repeat(64 * 1024 + 1));
+  await promisify(execFile)("/usr/bin/zip", ["-q", archive, "cloudflared-manifest.json"], { cwd: source });
+  await assert.rejects(installer.extractDarwinArchive(archive, bounded), /解压/);
+  await assert.rejects(readFile(path.join(bounded, "cloudflared-manifest.json")), { code: "ENOENT" });
+
 });

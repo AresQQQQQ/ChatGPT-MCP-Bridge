@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
@@ -19,7 +19,7 @@ import {
 } from "../src/commands/index.js";
 
 async function temporaryDirectory(prefix: string): Promise<string> {
-  return mkdtemp(path.join(os.tmpdir(), prefix));
+  return realpath(await mkdtemp(path.join(os.tmpdir(), prefix)));
 }
 
 function nodeCommand(script: string, cwd: string, limits: Partial<PlannedCommand> = {}): PlannedCommand {
@@ -111,7 +111,7 @@ test("controlled runner executes only the planned package-script argv", async ()
     await writeFile(
       manager,
       "process.stdout.write(JSON.stringify(process.argv.slice(2)));\n",
-      "utf8",
+      { encoding: "utf8", mode: 0o755 },
     );
 
     const result = await new ControlledCommandRunner().run(

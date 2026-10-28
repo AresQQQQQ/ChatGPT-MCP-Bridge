@@ -1,15 +1,24 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import net, { type Socket } from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 
 import { CodexBridgeError, type JsonObject } from "./codex-client.js";
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_PIPE = "\\\\.\\pipe\\codex-ipc";
+const WINDOWS_DEFAULT_PIPE = "\\\\.\\pipe\\codex-ipc";
+
+export function defaultCodexDesktopIpcPath(): string {
+  return process.platform === "darwin"
+    ? path.join(os.homedir(), ".codex", "ipc", "ipc.sock")
+    : WINDOWS_DEFAULT_PIPE;
+}
 const INITIALIZING_CLIENT = "initializing-client";
 const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
+const OWNER_DISCOVERY_TIMEOUT_MS = process.platform === "darwin" ? 1_000 : DEFAULT_REQUEST_TIMEOUT_MS;
 const START_TURN_TIMEOUT_MS = 120_000;
 const HISTORY_SYNC_TIMEOUT_MS = 15_000;
 const STATE_SYNC_WAIT_MS = 3_000;
@@ -193,7 +202,7 @@ export class CodexDesktopIpcClient implements CodexDesktopClient {
   private lastDisconnectedAt: string | undefined;
   private lastError: string | undefined;
 
-  public constructor(private readonly pipePath = DEFAULT_PIPE) {}
+  public constructor(private readonly pipePath = defaultCodexDesktopIpcPath()) {}
 
   public async connect(): Promise<void> {
     if (this.socket && !this.socket.destroyed && this.clientId) return;
@@ -236,11 +245,14 @@ export class CodexDesktopIpcClient implements CodexDesktopClient {
       const response = await this.sendRequest(
         "thread-owner-discovery",
         { hostId: "local", conversationId: threadId },
-        { timeoutMs: DEFAULT_REQUEST_TIMEOUT_MS },
+        { timeoutMs: OWNER_DISCOVERY_TIMEOUT_MS },
       );
       return response.handledByClientId;
     } catch (error) {
       if (error instanceof CodexBridgeError && /\bno-client-found\b/iu.test(error.message)) return undefined;
+      if (process.platform === "darwin"
+        && error instanceof CodexBridgeError
+        && /request timed out: thread-owner-discovery/iu.test(error.message)) return undefined;
       throw error;
     }
   }
@@ -392,7 +404,9 @@ export class CodexDesktopIpcClient implements CodexDesktopClient {
   }
 
   private async connectInternal(): Promise<void> {
-    if (process.platform !== "win32") throw new CodexBridgeError("Codex Desktop IPC is only supported on Windows in this version");
+    if (process.platform !== "win32" && process.platform !== "darwin") {
+      throw new CodexBridgeError("Codex Desktop IPC is supported on Windows and macOS in this version");
+    }
     this.closing = false;
     this.buffer = Buffer.alloc(0);
     const socket = await new Promise<Socket>((resolve, reject) => {
@@ -768,11 +782,15 @@ export class WindowsCodexDesktopActivationController implements CodexDesktopActi
   }
 
   public async openThread(threadId: string): Promise<void> {
-    if (process.platform !== "win32") throw new CodexBridgeError("Codex Desktop deep-link activation is only supported on Windows");
+    if (process.platform !== "win32" && process.platform !== "darwin") {
+      throw new CodexBridgeError("Codex Desktop deep-link activation is supported on Windows and macOS");
+    }
     validateThreadId(threadId);
     const url = `codex://threads/${encodeURIComponent(threadId)}`;
     await new Promise<void>((resolve, reject) => {
-      const child = spawn("explorer.exe", [url], { shell: false, windowsHide: true, stdio: "ignore" });
+      const executable = process.platform === "darwin" ? "/usr/bin/open" : "explorer.exe";
+      const args = process.platform === "darwin" ? ["-a", "ChatGPT", url] : [url];
+      const child = spawn(executable, args, { shell: false, windowsHide: process.platform === "win32", stdio: "ignore" });
       child.once("spawn", () => resolve());
       child.once("error", (error) => reject(new CodexBridgeError(`Could not activate Codex Desktop thread: ${error.message}`)));
     });

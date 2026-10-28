@@ -17,7 +17,7 @@ async function question(prompt: string, secret = false): Promise<string> {
 
 export async function runSetupWizard(configPath: string): Promise<number> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("请在交互式终端运行 pnpm run setup 或 setup.cmd；不要把密钥放在命令行参数中。");
-  if (process.platform !== "win32") throw new Error("自动配置向导目前支持 Windows x64 / ARM64；其他系统请按 README 手动配置。");
+  if (process.platform !== "win32" && !(process.platform === "darwin" && process.arch === "arm64")) throw new Error("自动配置向导支持 Windows x64 / ARM64 和 macOS Apple Silicon / ARM64；其他系统请按 README 手动配置。");
   let existing;
   try { await readFile(configPath); existing = await loadConfig(configPath); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
@@ -29,6 +29,6 @@ export async function runSetupWizard(configPath: string): Promise<number> {
   let reuseClient = false;
   if (existing?.tunnel) reuseClient = (await question("复用已配置客户端？[Y/n]：")).toLowerCase() !== "n";
   await setupTunnel({ configPath, tunnelId, ...(runtimeKey ? { runtimeKey } : {}), healthPort: Number(port || defaultPort), reuseClient }, { progress: console.log });
-  console.log("运行 .\\bridge.cmd 或 pnpm start 启动，然后在 ChatGPT 中连接对应 Tunnel。\n");
+  console.log(`运行 ${process.platform === "darwin" ? "./bridge.command" : ".\\bridge.cmd"} 或 pnpm start 启动，然后在 ChatGPT 中连接对应 Tunnel。\n`);
   return 0;
 }

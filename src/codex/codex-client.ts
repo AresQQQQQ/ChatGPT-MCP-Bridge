@@ -101,8 +101,15 @@ async function resolveCandidate(candidate: string): Promise<CodexLaunchSpec | un
 }
 
 async function desktopRuntimeCandidates(): Promise<readonly string[]> {
-  if (process.platform !== "win32") return [];
   const candidates: string[] = [];
+  if (process.platform === "darwin") {
+    candidates.push(
+      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+      path.join(process.env.HOME ?? "", "Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
+    );
+    return candidates.filter((candidate) => path.isAbsolute(candidate));
+  }
+  if (process.platform !== "win32") return [];
   const userProfile = process.env.USERPROFILE;
   if (userProfile && path.isAbsolute(userProfile)) {
     candidates.push(path.join(userProfile, ".codex", "plugins", ".plugin-appserver", "codex.exe"));
@@ -148,7 +155,7 @@ export async function resolveCodexLaunch(clientPath?: string): Promise<CodexLaun
     return configured;
   }
 
-  if (process.platform === "win32") {
+  if (process.platform === "win32" || process.platform === "darwin") {
     for (const candidate of await desktopRuntimeCandidates()) {
       const resolved = await resolveCandidate(candidate);
       if (resolved) return resolved;
