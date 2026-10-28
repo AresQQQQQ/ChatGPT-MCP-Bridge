@@ -51,3 +51,9 @@ footer{border-top:1px solid var(--border);padding-top:14px;margin-top:20px;font-
 @media(prefers-color-scheme:dark){:root{--bg:#202228;--surface:#292c33;--text:#e7e9ee;--muted:#a1a7b2;--border:#414650;--accent:#63a6ff;--accent-soft:#293d57;--good:#7ecba0;--good-soft:#263d32;--warn:#e6b17c;--warn-soft:#403329;--bad:#ef8c8c;--bad-soft:#452b2d;--input:#24272e;--shadow:none}input[type=text],input[type=password],input[type=number]{border-color:#4a505b}.state-pill{background:#363941;color:#b4bbc7}.progress-track{background:#384354}}
 @media(max-width:560px){.shell{width:100%;margin:0;border-radius:0;border:0;padding:22px 18px 15px;min-height:100vh}.brand{margin-bottom:18px}.field-row{display:block}.port-note{margin:0 0 16px;display:flex;align-items:center;justify-content:space-between}.actions button{flex:1}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+.advanced-settings{border:1px solid var(--border);border-radius:8px;padding:0 12px;margin:0 0 16px;background:var(--bg)}
+.advanced-settings summary{cursor:pointer;list-style-position:inside;padding:11px 0;font-size:12px;font-weight:650;color:var(--text);user-select:none}
+.advanced-settings summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:3px}
+.advanced-content{padding:0 0 2px}
+.advanced-content label{display:block;font-size:12px;font-weight:650;margin:0 0 7px}
+.advanced-content .hint{margin-bottom:8px}

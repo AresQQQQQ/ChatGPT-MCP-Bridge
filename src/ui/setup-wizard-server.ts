@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
+import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -14,6 +15,7 @@ const setupRequestSchema = z.object({
   tunnelId: z.string().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).max(135),
   runtimeKey: z.string().trim().max(4096),
   healthPort: z.number().int().min(1024).max(65535),
+  bridgePort: z.number().int().min(1).max(65535).optional(),
   reuseClient: z.boolean(),
 }).strict();
 
@@ -95,20 +97,49 @@ export async function readSetupWizardSnapshot(
   };
 }
 
-async function assertBridgeStopped(configPath: string): Promise<void> {
-  if (await readOptional(configPath) === undefined) return;
+async function assertBridgeStopped(configPath: string): Promise<BridgeConfig | undefined> {
+  if (await readOptional(configPath) === undefined) return undefined;
   const config = await loadConfig(configPath);
   const host = ["0.0.0.0", "::", ""].includes(config.host) ? "127.0.0.1" : config.host;
   const authority = host.includes(":") ? `[${host}]` : host;
   try {
     const response = await fetch(`http://${authority}:${config.port}/health`, { signal: AbortSignal.timeout(800) });
-    if (!response.ok) return;
-    const payload = await response.json().catch(() => undefined) as { ok?: unknown; service?: unknown } | undefined;
-    if (payload?.ok === true && payload.service === "chatgpt-mcp-bridge") {
-      throw new Error("检测到本机 Bridge 仍在运行。请先停止 Bridge，再重新配置 Tunnel；原配置未修改。");
+    if (response.ok) {
+      const payload = await response.json().catch(() => undefined) as { ok?: unknown; service?: unknown } | undefined;
+      if (payload?.ok === true && payload.service === "chatgpt-mcp-bridge") {
+        throw new Error("检测到本机 Bridge 仍在运行。请先停止 Bridge，再重新配置 Tunnel；原配置未修改。");
+      }
     }
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("检测到本机 Bridge")) throw error;
+  }
+  return config;
+}
+
+async function assertPortAvailable(port: number): Promise<void> {
+  for (const host of ["127.0.0.1", "::1"]) {
+    await new Promise<void>((resolve, reject) => {
+      const probe = createNetServer();
+      probe.once("error", error => {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "EADDRNOTAVAIL" || code === "EAFNOSUPPORT" || code === "EPROTONOSUPPORT") {
+          resolve();
+          return;
+        }
+        if (code === "EADDRINUSE") {
+          reject(new Error(`Bridge 端口 ${port} 已被占用，请选择其他端口。`));
+          return;
+        }
+        if (code === "EACCES") {
+          reject(new Error(`Bridge 端口 ${port} 无法绑定（可能被占用或需要管理员权限），请换一个可用端口。`));
+          return;
+        }
+        reject(error);
+      });
+      probe.listen({ host, port, exclusive: true }, () => {
+        probe.close(error => error ? reject(error) : resolve());
+      });
+    });
   }
 }
 
@@ -182,12 +213,16 @@ export async function launchSetupWizardServer(
         const before = await readSetupWizardSnapshot(configPath, state);
         if (before.configurationError) throw new Error(before.configurationError);
         if (!input.runtimeKey && !before.hasRuntimeKey) throw new Error("首次配置需要填写 Runtime API key。");
-        await assertBridgeStopped(configPath);
+        const existingConfig = await assertBridgeStopped(configPath);
+        const bridgePort = input.bridgePort ?? existingConfig?.port ?? 3000;
+        if (bridgePort === input.healthPort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
+        await assertPortAvailable(bridgePort);
         const setupInput: SetupInput = {
           configPath,
           tunnelId: input.tunnelId,
           runtimeKey: input.runtimeKey,
           healthPort: input.healthPort,
+          bridgePort,
           reuseClient: input.reuseClient,
         };
         await (options.setup ?? setupTunnel)(setupInput, {

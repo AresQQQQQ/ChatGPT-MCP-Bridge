@@ -25,18 +25,27 @@ function setStatus(text, tone) {
 }
 function setBusy(value) {
   submitting = value;
-  for (const id of ["tunnel-id", "runtime-key", "health-port", "reuse-client"]) $(id).disabled = value || Boolean(snapshot?.success);
+  for (const id of ["tunnel-id", "runtime-key", "health-port", "bridge-port-input", "reuse-client"]) $(id).disabled = value || Boolean(snapshot?.success);
   $("apply").disabled = value || Boolean(snapshot?.success) || Boolean(snapshot?.configurationError);
   $("cancel").disabled = value;
   $("apply").textContent = value ? "正在配置…" : snapshot?.success ? "配置已完成" : "验证并保存配置";
   $("progress-track").hidden = !value;
 }
+function updateBridgePortDisplay() {
+  const selected = $("bridge-port-input").value;
+  const shown = selected || String(snapshot?.bridgePort || 3000);
+  $("bridge-port").textContent = shown;
+  $("port-hint").textContent = "健康检查端口必须与 Bridge 端口 " + shown + " 不同。";
+}
 function render(state) {
   snapshot = state;
-  $("bridge-port").textContent = String(state.bridgePort || 3000);
-  $("port-hint").textContent = "需与 Bridge 监听端口 " + String(state.bridgePort || 3000) + " 不同。";
-  $("health-port").value = String(state.defaultHealthPort || 8080);
-  $("reuse-client").checked = Boolean(state.reuseClientDefault);
+  if (!initialized) {
+    $("health-port").value = String(state.defaultHealthPort || 8080);
+    $("reuse-client").checked = Boolean(state.reuseClientDefault);
+    $("bridge-port-input").value = String(state.bridgePort || 3000);
+    initialized = true;
+  }
+  updateBridgePortDisplay();
   $("reuse-row").hidden = !state.tunnelConfigured;
   $("key-required").textContent = state.hasRuntimeKey ? "可选" : "必填";
   $("key-hint").textContent = state.hasRuntimeKey
@@ -82,10 +91,14 @@ $("setup-form").addEventListener("submit", async event => {
   const tunnelId = $("tunnel-id").value.trim();
   const runtimeKey = $("runtime-key").value;
   const healthPort = Number($("health-port").value);
+  const bridgePort = Number($("bridge-port-input").value);
   if (!/^tunnel_[A-Za-z0-9_-]{1,128}$/.test(tunnelId)) {
     $("error-message").hidden = false; $("error-message").textContent = "Tunnel ID 格式无效，应以 tunnel_ 开头。"; return;
   }
-  if (!Number.isInteger(healthPort) || healthPort < 1024 || healthPort > 65535 || healthPort === Number(snapshot?.bridgePort || 3000)) {
+  if (!Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535) {
+    $("error-message").hidden = false; $("error-message").textContent = "Bridge 端口须为 1–65535。"; return;
+  }
+  if (!Number.isInteger(healthPort) || healthPort < 1024 || healthPort > 65535 || healthPort === bridgePort) {
     $("error-message").hidden = false; $("error-message").textContent = "健康端口须为 1024–65535，且不能与 Bridge 端口相同。"; return;
   }
   if (!runtimeKey && !snapshot?.hasRuntimeKey) {
@@ -94,7 +107,7 @@ $("setup-form").addEventListener("submit", async event => {
   $("error-message").hidden = true;
   setBusy(true);
   try {
-    await request("/api/setup", { tunnelId, runtimeKey, healthPort, reuseClient: $("reuse-client").checked });
+    await request("/api/setup", { tunnelId, runtimeKey, healthPort, bridgePort, reuseClient: $("reuse-client").checked });
     $("runtime-key").value = "";
     await refresh();
   } catch (error) {
@@ -103,6 +116,7 @@ $("setup-form").addEventListener("submit", async event => {
     await refresh();
   } finally { setBusy(Boolean(snapshot?.running)); }
 });
+$("bridge-port-input").addEventListener("input", updateBridgePortDisplay);
 $("cancel").addEventListener("click", () => {
   if (snapshot?.running || submitting) return;
   const handler = window.webkit?.messageHandlers?.closeWizard;

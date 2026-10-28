@@ -68,6 +68,13 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
             <StackPanel><TextBlock Text="Bridge 端口" FontSize="10" Foreground="#667085"/><TextBlock x:Name="BridgePort" Text="3000" FontFamily="Consolas" FontWeight="SemiBold" FontSize="13" Margin="0,3,0,0"/></StackPanel>
           </Border>
         </Grid>
+        <Expander x:Name="AdvancedSettingsExpander" Header="高级设置" IsExpanded="False" FontSize="12" Foreground="#344054" Margin="0,12,0,0">
+          <StackPanel Margin="0,8,0,0">
+            <TextBlock Text="Bridge 监听端口" FontSize="12" FontWeight="SemiBold" Foreground="#344054" Margin="0,0,0,6"/>
+            <TextBox x:Name="BridgePortBox" Text="3000"/>
+            <TextBlock Text="仅在需要时修改。更改端口前必须停止当前 Bridge；保存后会同步更新 Bridge 配置和 Tunnel MCP 地址。" FontSize="10" Foreground="#667085" TextWrapping="Wrap" Margin="0,5,0,0"/>
+          </StackPanel>
+        </Expander>
         <CheckBox x:Name="ReuseClientCheck" Content="复用本机已安装的 Tunnel Client" FontSize="12" Foreground="#344054" Margin="0,16,0,0"/>
         <TextBlock x:Name="ReuseHint" Text="仍会创建独立 profile，不覆盖原 profile。" FontSize="10" Foreground="#667085" Margin="20,4,0,0"/>
       </StackPanel>
@@ -100,6 +107,7 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 $tunnelIdBox=$window.FindName("TunnelIdBox")
 $runtimeKeyBox=$window.FindName("RuntimeKeyBox")
 $healthPortBox=$window.FindName("HealthPortBox")
+$bridgePortBox=$window.FindName("BridgePortBox")
 $reuseClientCheck=$window.FindName("ReuseClientCheck")
 $reuseHint=$window.FindName("ReuseHint")
 $modeTitle=$window.FindName("ModeTitle")
@@ -115,6 +123,10 @@ $progressDetail=$window.FindName("ProgressDetail")
 $errorText=$window.FindName("ErrorText")
 $cancelButton=$window.FindName("CancelButton")
 $applyButton=$window.FindName("ApplyButton")
+$bridgePortBox.Add_TextChanged({
+  if($bridgePortBox.Text -match '^\d+$'){$bridgePort.Text=$bridgePortBox.Text}
+  $portHint.Text="健康检查端口需与 Bridge 端口 " + $bridgePort.Text + " 不同。"
+})
 $script:ApiBase=$ApiBase
 $script:Token=$Token
 $script:busy=$false
@@ -125,6 +137,7 @@ function Set-InputsEnabled([bool]$enabled) {
   $tunnelIdBox.IsEnabled=$enabled
   $runtimeKeyBox.IsEnabled=$enabled
   $healthPortBox.IsEnabled=$enabled
+  $bridgePortBox.IsEnabled=$enabled
   $reuseClientCheck.IsEnabled=$enabled -and $script:snapshot -and $script:snapshot.tunnelConfigured
   $applyButton.IsEnabled=$enabled -and -not ($script:snapshot.configurationError)
   $cancelButton.IsEnabled=$enabled
@@ -135,11 +148,12 @@ function Read-SetupState {
     $script:snapshot=$state
     if(-not $script:initialized){
       $healthPortBox.Text=[string]$state.defaultHealthPort
+      $bridgePortBox.Text=[string]$state.bridgePort
       $reuseClientCheck.IsChecked=[bool]$state.reuseClientDefault
       $script:initialized=$true
     }
-    $bridgePort.Text=[string]$state.bridgePort
-    $portHint.Text="需与 Bridge 监听端口 " + [string]$state.bridgePort + " 不同。"
+    $bridgePort.Text=if($bridgePortBox.Text -match '^\d+$'){$bridgePortBox.Text}else{[string]$state.bridgePort}
+    $portHint.Text="健康检查端口需与 Bridge 端口 " + [string]$bridgePort.Text + " 不同。"
     $reuseClientCheck.Visibility=if($state.tunnelConfigured){'Visible'}else{'Collapsed'}
     $reuseHint.Visibility=if($state.tunnelConfigured){'Visible'}else{'Collapsed'}
     $modeTitle.Text=if($state.tunnelConfigured){"重新配置本机 Tunnel"}else{"首次配置本机 Tunnel"}
@@ -197,15 +211,19 @@ $applyButton.Add_Click({
   if($id -notmatch '^tunnel_[A-Za-z0-9_-]{1,128}$'){
     $errorText.Text="Tunnel ID 格式无效，应以 tunnel_ 开头。";$errorText.Visibility='Visible';return
   }
+  $bridgePortValue=0
+  if(-not [int]::TryParse($bridgePortBox.Text,[ref]$bridgePortValue) -or $bridgePortValue -lt 1 -or $bridgePortValue -gt 65535){
+    $errorText.Text="Bridge 端口须为 1–65535。";$errorText.Visibility='Visible';return
+  }
   $port=0
-  if(-not [int]::TryParse($healthPortBox.Text,[ref]$port) -or $port -lt 1024 -or $port -gt 65535 -or $port -eq [int]$script:snapshot.bridgePort){
-    $errorText.Text="健康端口须为 1024–65535，且不能与 Bridge 端口相同。";$errorText.Visibility='Visible';return
+  if(-not [int]::TryParse($healthPortBox.Text,[ref]$port) -or $port -lt 1024 -or $port -gt 65535 -or $port -eq $bridgePortValue){
+    $errorText.Text="健康检查端口须为 1024–65535，且不能与 Bridge 端口相同。";$errorText.Visibility='Visible';return
   }
   $key=$runtimeKeyBox.Password
   if([string]::IsNullOrWhiteSpace($key) -and -not $script:snapshot.hasRuntimeKey){
     $errorText.Text="首次配置需要填写 Runtime API key。";$errorText.Visibility='Visible';return
   }
-  $payload=@{tunnelId=$id;runtimeKey=$key;healthPort=$port;reuseClient=[bool]$reuseClientCheck.IsChecked}
+  $payload=@{tunnelId=$id;runtimeKey=$key;healthPort=$port;bridgePort=$bridgePortValue;reuseClient=[bool]$reuseClientCheck.IsChecked}
   $runtimeKeyBox.Password=''
   $script:busy=$true
   $errorText.Text='';$errorText.Visibility='Collapsed'

@@ -149,7 +149,7 @@ export function updateRuntimeKey(content: string, key: string): string {
   }).join("\n") + "\n";
 }
 
-export interface SetupInput { configPath: string; tunnelId: string; runtimeKey?: string; healthPort: number; reuseClient: boolean }
+export interface SetupInput { configPath: string; tunnelId: string; runtimeKey?: string; healthPort: number; bridgePort?: number; reuseClient: boolean }
 export interface SetupDependencies {
   install?: (directory: string, progress: (message: string) => void) => Promise<string>;
   initialize?: (client: string, args: string[]) => Promise<void>;
@@ -175,7 +175,9 @@ export async function setupTunnel(input: SetupInput, deps: SetupDependencies = {
     const oldEnv = await readOptional(envPath);
     const key = input.runtimeKey || parseEnv(oldEnv ?? "").CONTROL_PLANE_API_KEY;
     const newEnv = updateRuntimeKey(oldEnv ?? "", key ?? "");
-    if (input.healthPort === (loaded?.port ?? 3000)) throw new Error("健康端口不能与 Bridge 端口相同。");
+    const bridgePort = input.bridgePort ?? loaded?.port ?? 3000;
+    if (!Number.isInteger(bridgePort) || bridgePort < 1 || bridgePort > 65535) throw new Error("Bridge 端口须为 1–65535。");
+    if (input.healthPort === bridgePort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
     stage = await mkdtemp(path.join(state, "tunnel-setup-"));
     const progress = deps.progress ?? (() => undefined);
     let client: string;
@@ -188,10 +190,11 @@ export async function setupTunnel(input: SetupInput, deps: SetupDependencies = {
     const profile = "bridge";
     const host = loaded?.host ?? "127.0.0.1";
     const localHost = ["0.0.0.0", "::"].includes(host) ? "127.0.0.1" : host;
-    const mcpUrl = `http://${localHost.includes(":") ? `[${localHost}]` : localHost}:${loaded?.port ?? 3000}${loaded?.mcpPath ?? "/mcp"}`;
+    const mcpUrl = `http://${localHost.includes(":") ? `[${localHost}]` : localHost}:${bridgePort}${loaded?.mcpPath ?? "/mcp"}`;
     if (!isLoopbackUrl(mcpUrl)) throw new Error("配置向导仅支持回环 Bridge 地址；当前主机地址请手动配置。");
     await (deps.initialize ?? runQuiet)(client, ["init", "--profile", profile, "--profile-dir", profileDir,
       "--tunnel-id", input.tunnelId, "--mcp-server-url", mcpUrl, "--health-listen-addr", `127.0.0.1:${input.healthPort}`]);
+    raw.port = bridgePort;
     raw.tunnel = { clientPath: client, profile, profileDir, healthUrl: `http://127.0.0.1:${input.healthPort}` };
     const configTemp = path.join(stage, "config.pending");
     const envTemp = path.join(stage, "env.pending");

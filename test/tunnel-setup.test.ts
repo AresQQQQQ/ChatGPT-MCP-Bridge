@@ -76,6 +76,19 @@ test("setup preserves workspaces and auth, isolates profiles, and keeps keys out
     ["run", "--profile", "bridge", "--profile-dir", raw.tunnel.profileDir]);
 });
 
+test("setup persists a selected Bridge port and initializes Tunnel with the matching MCP URL", async t => {
+  const f = await fixture(t);
+  const bridgePort = 3217;
+  let args: string[] = [];
+  await setupTunnel({ ...f.input, bridgePort }, {
+    initialize: async (_client, argv) => { args = argv; },
+  });
+  const raw = JSON.parse(await readFile(f.configPath, "utf8"));
+  assert.equal(raw.port, bridgePort);
+  const urlIndex = args.indexOf("--mcp-server-url");
+  assert.ok(urlIndex >= 0);
+  assert.equal(args[urlIndex + 1], `http://127.0.0.1:${bridgePort}/mcp`);
+});
 test("initialization failure leaves existing config and env byte-identical and cleans staging", async t => {
   const f = await fixture(t);
   const beforeConfig = await readFile(f.configPath);
@@ -117,6 +130,13 @@ test("invalid tunnel ID, key and colliding port fail before invoking installer",
   await assert.rejects(setupTunnel({ ...f.input, healthPort: 3000 }, deps), /不能与 Bridge/);
 });
 
+test("setup rejects an invalid or colliding selected Bridge port before installation", async t => {
+  const f = await fixture(t);
+  const deps = { install: async (): Promise<string> => { assert.fail("must not download"); } };
+  await assert.rejects(setupTunnel({ ...f.input, bridgePort: 0 }, deps), /Bridge/);
+  await assert.rejects(setupTunnel({ ...f.input, bridgePort: 65536 }, deps), /Bridge/);
+  await assert.rejects(setupTunnel({ ...f.input, bridgePort: 8081 }, deps), /不能与 Bridge/);
+});
 test("installer selects darwin arm64 explicitly without changing Windows assets", () => {
   const mac = { ...asset, name: "tunnel-client-v1.0.0-darwin-arm64.zip" };
   const release = { tag_name: "v1.0.0", assets: [asset, mac] };

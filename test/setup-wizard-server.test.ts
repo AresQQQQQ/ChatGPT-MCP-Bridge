@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,15 @@ import { test } from "node:test";
 import { configFileTemplate } from "../src/config.js";
 import { launchSetupWizardServer } from "../src/ui/setup-wizard-server.js";
 
+async function availablePort(): Promise<number> {
+  const server = createTcpServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return address.port;
+}
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "bridge-setup-ui-"));
   const configPath = path.join(root, "mcp-bridge.json");
@@ -59,18 +69,48 @@ test("setup wizard validates input, reports progress, and keeps submitted creden
   });
   assert.equal((await post({ tunnelId: "bad-id", runtimeKey: "", healthPort: 8081, reuseClient: false })).status, 400);
   assert.equal(captured, undefined);
+  assert.equal((await post({ tunnelId: "tunnel_fixture", runtimeKey: "new-runtime-key-fixture", healthPort: 8081, bridgePort: 0, reuseClient: false })).status, 400);
+  assert.equal((await post({ tunnelId: "tunnel_fixture", runtimeKey: "new-runtime-key-fixture", healthPort: 8081, bridgePort: 8081, reuseClient: false })).status, 400);
   assert.equal((await post({ tunnelId: "tunnel_fixture", runtimeKey: "new-runtime-key-fixture", healthPort: 8081, reuseClient: false }, "http://evil.invalid")).status, 403);
   assert.equal(captured, undefined);
   // WPF PowerShell HTTP requests do not send an Origin header; the bearer token still authenticates them.
-  const response = await post({ tunnelId: "tunnel_fixture", runtimeKey: "new-runtime-key-fixture", healthPort: 8081, reuseClient: false });
+  const bridgePort = await availablePort();
+  const healthPort = bridgePort === 8081 ? 8082 : 8081;
+  const response = await post({ tunnelId: "tunnel_fixture", runtimeKey: "new-runtime-key-fixture", healthPort, bridgePort, reuseClient: false });
   assert.equal(response.status, 200);
   assert.equal(captured?.tunnelId, "tunnel_fixture");
+  assert.equal(captured?.bridgePort, bridgePort);
   assert.equal(captured?.runtimeKey, "new-runtime-key-fixture");
   const snapshot = await (await fetch(ui.origin + "/api/snapshot", { headers: { Authorization: "Bearer " + ui.token } })).text();
   assert.match(snapshot, /"success":true/u);
   assert.doesNotMatch(snapshot, /new-runtime-key-fixture|tunnel_fixture/);
 });
 
+test("setup wizard refuses a Bridge port that is already occupied before invoking setup", async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bridge-setup-ui-port-busy-"));
+  const configPath = path.join(root, "mcp-bridge.json");
+  await writeFile(path.join(root, ".env"), "CONTROL_PLANE_API_KEY=existing-key\n");
+  const occupied = createTcpServer();
+  occupied.listen(0, "127.0.0.1");
+  await once(occupied, "listening");
+  const address = occupied.address();
+  assert.ok(address && typeof address !== "string");
+  let invoked = false;
+  const ui = await launchSetupWizardServer(configPath, { setup: async () => { invoked = true; } });
+  t.after(async () => {
+    await ui.close();
+    await new Promise<void>(resolve => occupied.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  });
+  const response = await fetch(ui.origin + "/api/setup", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + ui.token, Origin: ui.origin, "Content-Type": "application/json" },
+    body: JSON.stringify({ tunnelId: "tunnel_fixture", runtimeKey: "", healthPort: address.port === 8081 ? 8082 : 8081, bridgePort: address.port, reuseClient: false }),
+  });
+  assert.equal(response.status, 400);
+  assert.match(await response.text(), /已被占用/u);
+  assert.equal(invoked, false);
+});
 test("setup wizard requires a Runtime API key for a fresh local configuration", async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "bridge-setup-ui-key-required-"));
   const configPath = path.join(root, "mcp-bridge.json");

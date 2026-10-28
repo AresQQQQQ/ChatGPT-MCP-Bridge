@@ -35,6 +35,14 @@
       <div class="port-note"><span>Bridge 端口</span><strong id="bridge-port">3000</strong></div>
     </div>
 
+    <details id="advanced-settings" class="advanced-settings">
+      <summary>高级设置</summary>
+      <div class="advanced-content">
+        <label for="bridge-port-input">Bridge 监听端口</label>
+        <input id="bridge-port-input" name="bridgePort" type="number" min="1" max="65535" step="1" value="3000" required>
+        <p class="hint">仅在需要时修改。更改端口前必须停止当前 Bridge；保存后会同步更新 Bridge 配置和 Tunnel MCP 地址。</p>
+      </div>
+    </details>
     <label id="reuse-row" class="check-row" for="reuse-client">
       <input id="reuse-client" name="reuseClient" type="checkbox">
       <span><strong>复用本机已安装的 Tunnel Client</strong><small>仍会创建独立 profile，不覆盖原有 profile。</small></span>

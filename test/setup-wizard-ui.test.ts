@@ -20,6 +20,8 @@ test("Windows setup wizard uses a password field and reports progress without sh
   assert.match(source, /x:Name="ProgressBar"/u);
   assert.match(source, /script:Token/u);
   assert.match(source, /Runtime API key/u);
+  assert.match(source, /x:Name="BridgePortBox"/u);
+  assert.match(source, /bridgePort=\$bridgePortValue/u);
 });
 
 test("Mac setup page includes the same local-only setup fields and progress feedback", async () => {
@@ -31,6 +33,9 @@ test("Mac setup page includes the same local-only setup fields and progress feed
   assert.ok(js.includes("/api/snapshot"));
   assert.ok(js.includes("closeWizard"));
   assert.ok(css.includes(".progress-track"));
+  assert.ok(html.includes('id="advanced-settings"'));
+  assert.ok(html.includes('id="bridge-port-input"'));
+  assert.ok(js.includes("bridgePort, reuseClient"));
 });
 test("macOS setup runner checks source timestamps without unresolved helpers and rebuilds stale native UI", async () => {
   const runner = await readFile(path.resolve("tools/run-setup.mjs"), "utf8");
