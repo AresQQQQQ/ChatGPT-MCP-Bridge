@@ -23,9 +23,18 @@ set "BRIDGE_TSX=%~dp0node_modules\tsx\dist\cli.mjs"
 set "BRIDGE_CLI=%~dp0src\cli.ts"
 set "BRIDGE_CONFIG=%~dp0mcp-bridge.json"
 
-if not exist "%BRIDGE_CONFIG%" (
+set "NEED_SETUP=0"
+if not exist "%BRIDGE_CONFIG%" set "NEED_SETUP=1"
+if not exist "%~dp0.env" set "NEED_SETUP=1"
+if "%NEED_SETUP%"=="0" (
+  powershell.exe -NoLogo -NoProfile -Command "$c=Get-Content -Raw '%BRIDGE_CONFIG%' | ConvertFrom-Json; if(!$c.tunnel){exit 1}else{exit 0}"
+  if errorlevel 1 set "NEED_SETUP=1"
+)
+if "%NEED_SETUP%"=="1" (
   call "%~dp0setup.cmd"
   if errorlevel 1 exit /b 1
+  if not exist "%BRIDGE_CONFIG%" exit /b 1
+  if not exist "%~dp0.env" exit /b 1
 )
 
 if not exist "%BRIDGE_TSX%" (

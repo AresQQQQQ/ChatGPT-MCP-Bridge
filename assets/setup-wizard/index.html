@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatGPT MCP Bridge · Tunnel 配置</title>
+<link rel="stylesheet" href="/setup.css">
+<script src="/setup.js" defer></script>
+</head>
+<body>
+<main class="shell">
+  <header class="brand">
+    <div class="brand-mark" aria-hidden="true">↗</div>
+    <div><p class="eyebrow">CHATGPT MCP BRIDGE</p><h1>Tunnel 配置向导</h1><p class="subtitle">在本机安全配置 Secure Tunnel</p></div>
+  </header>
+  <section class="intro">
+    <div class="intro-icon" aria-hidden="true">◎</div>
+    <div><h2 id="mode-title">准备配置本机 Tunnel</h2><p id="mode-description">配置仅保存在当前电脑，不会同步到 GitHub 或另一台电脑。</p></div>
+  </section>
+  <form id="setup-form" autocomplete="off">
+    <label for="tunnel-id">Tunnel ID <span class="required">必填</span></label>
+    <input id="tunnel-id" name="tunnelId" type="text" placeholder="tunnel_..." pattern="tunnel_[A-Za-z0-9_-]{1,128}" maxlength="135" spellcheck="false" required>
+    <p class="hint">从 OpenAI Tunnel 管理页面复制完整 ID。</p>
+
+    <label for="runtime-key">Runtime API key <span id="key-required" class="required">必填</span></label>
+    <input id="runtime-key" name="runtimeKey" type="password" placeholder="输入 Runtime API key" autocomplete="new-password" spellcheck="false">
+    <p id="key-hint" class="hint">密钥仅写入本机 .env，不会显示在日志中。已有密钥可留空保留。</p>
+
+    <div class="field-row">
+      <div class="field-grow">
+        <label for="health-port">Tunnel 健康检查端口</label>
+        <input id="health-port" name="healthPort" type="number" min="1024" max="65535" step="1" value="8080" required>
+        <p id="port-hint" class="hint">需与 Bridge 监听端口不同。</p>
+      </div>
+      <div class="port-note"><span>Bridge 端口</span><strong id="bridge-port">3000</strong></div>
+    </div>
+
+    <label id="reuse-row" class="check-row" for="reuse-client">
+      <input id="reuse-client" name="reuseClient" type="checkbox">
+      <span><strong>复用本机已安装的 Tunnel Client</strong><small>仍会创建独立 profile，不覆盖原有 profile。</small></span>
+    </label>
+
+    <div id="config-warning" class="notice" hidden></div>
+    <div id="error-message" class="error" role="alert" hidden></div>
+    <section id="progress-panel" class="progress-panel" aria-live="polite">
+      <div class="progress-heading"><span id="progress-title">等待配置</span><span id="progress-state" class="state-pill">就绪</span></div>
+      <div id="progress-track" class="progress-track" hidden><span></span></div>
+      <p id="progress-detail">提交后将下载并校验官方客户端，然后初始化本机 profile。</p>
+    </section>
+
+    <div class="actions">
+      <button id="cancel" type="button" class="secondary">取消</button>
+      <button id="apply" type="submit" class="primary">验证并保存配置</button>
+    </div>
+  </form>
+  <footer>本机配置 · SHA-256 校验 · 失败时保留原配置</footer>
+</main>
+</body>
+</html>

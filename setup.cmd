@@ -7,5 +7,5 @@ if not exist "%~dp0node_modules\tsx\dist\cli.mjs" (
   echo Dependencies are missing. Run pnpm install once.
   exit /b 1
 )
-"%BRIDGE_NODE%" "%~dp0node_modules\tsx\dist\cli.mjs" "%~dp0src\cli.ts" setup --config "%~dp0mcp-bridge.json"
+"%BRIDGE_NODE%" "%~dp0tools\run-setup.mjs" --config "%~dp0mcp-bridge.json"
 exit /b %errorlevel%

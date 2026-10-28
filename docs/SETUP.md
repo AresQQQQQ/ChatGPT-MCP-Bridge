@@ -62,7 +62,7 @@ npm install -g pnpm@11.19.0
 
 运行时通过 `process.execPath` 与登录 shell 的 PATH 发现。Apple Silicon Homebrew 的 `/opt/homebrew/bin` 场景已验证，不要求固定用户名或唯一安装目录。Finder 启动使用登录 shell；如果 shell 中未配置 Node，启动入口会给出明确提示。
 
-向导输入已有 Tunnel ID 和 Runtime API key，健康端口可以选 `8081`。当前统一 profile 名为 `bridge`，由官方 `init --profile-dir` 在 `.mcp-bridge-state/tunnel-setup-*/profiles/bridge.yaml` 中生成；这是现有项目的隔离 profile 模型，并非 Windows profile 副本。ID 仅保存于这个本机 profile，key 保存于 `.env`；profile 通过 `env:CONTROL_PLANE_API_KEY` 引用 key。不要把共享鉴权文件复制到仓库中。
+pnpm run setup 会打开原生图形化 Tunnel 配置向导。输入 Tunnel ID、Runtime API key 和健康端口；已有 Runtime API key 可以留空以保留本机密钥。下载、SHA-256 校验和 profile 初始化进度会显示在向导中。
 
 调整 `mcp-bridge.json` 的 `workspaces` 到实际绝对路径；启用 trusted-dev 时，Bridge 以本机当前用户运行开发命令。Bridge 项目自身的有效脚本是 `test`、`build`、`typecheck`。
 

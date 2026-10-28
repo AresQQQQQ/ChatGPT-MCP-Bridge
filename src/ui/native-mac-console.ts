@@ -7,7 +7,7 @@ import { access, lstat } from "node:fs/promises";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 export interface NativeMacUi { close(): Promise<void> }
 
-export async function launchNativeMacUi(configPath: string): Promise<NativeMacUi> {
+async function launchNativeMacUiMode(configPath: string, mode: "console" | "setup"): Promise<NativeMacUi> {
   if (process.platform !== "darwin" || process.arch !== "arm64") throw new Error("原生 Mac 控制台目前支持 macOS Apple Silicon。");
   const executable = path.join(root, ".mcp-bridge-state/ChatGPT MCP Bridge.app/Contents/MacOS/BridgeControl");
   const host = path.join(root, "dist/ui/mac-app-host.js");
@@ -18,7 +18,7 @@ export async function launchNativeMacUi(configPath: string): Promise<NativeMacUi
   } catch {
     throw new Error("Mac 控制台尚未构建，请先运行 pnpm run ui:build。");
   }
-  const child: ChildProcess = spawn(executable, [], { shell: false, stdio: "ignore", env: { ...process.env, BRIDGE_UI_CONFIG: path.resolve(configPath) } });
+  const child: ChildProcess = spawn(executable, [], { shell: false, stdio: "ignore", env: { ...process.env, BRIDGE_UI_CONFIG: path.resolve(configPath), BRIDGE_UI_MODE: mode } });
   await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
   const exited = new Promise<void>(resolve => child.once("close", () => resolve()));
   return {
@@ -27,4 +27,12 @@ export async function launchNativeMacUi(configPath: string): Promise<NativeMacUi
       await exited;
     },
   };
+}
+
+export function launchNativeMacUi(configPath: string): Promise<NativeMacUi> {
+  return launchNativeMacUiMode(configPath, "console");
+}
+
+export function launchNativeMacSetupUi(configPath: string): Promise<NativeMacUi> {
+  return launchNativeMacUiMode(configPath, "setup");
 }

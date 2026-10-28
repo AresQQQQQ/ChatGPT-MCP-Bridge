@@ -15,10 +15,11 @@
     "assets/icons",
     "README.md",
     "LICENSE",
-    "assets/mac-console"
+    "assets/mac-console",
+    "assets/setup-wizard"
   ],
   "scripts": {
-    "setup": "tsx src/cli.ts setup",
+    "setup": "node tools/run-setup.mjs",
     "export:source": "node tools/export-source.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.json",

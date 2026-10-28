@@ -1,9 +1,12 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { launchMacControlUi } from "./mac-console.js";
+import { launchSetupWizardServer } from "./setup-wizard-server.js";
 
 export async function runMacAppHost(configPath: string): Promise<void> {
-  const ui = await launchMacControlUi(configPath, { openBrowser: false });
+  const ui = process.env.BRIDGE_UI_MODE === "setup"
+    ? await launchSetupWizardServer(configPath)
+    : await launchMacControlUi(configPath, { openBrowser: false });
   let stopping = false;
   const stop = async (): Promise<void> => {
     if (stopping) return;

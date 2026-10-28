@@ -47,7 +47,8 @@ pnpm build
 pnpm run setup
 ```
 
-按提示填写上面的 Tunnel ID、Runtime API key，健康端口通常保持默认即可。密钥输入不会显示。也可以运行 `setup.cmd`；请使用 `pnpm run setup`，避免与 pnpm 自带的 `setup` 命令混淆。
+运行 pnpm run setup 会打开原生图形化 Tunnel 配置向导（Windows 为 WPF，macOS 为 AppKit/WebKit）。填写 Tunnel ID、Runtime API key 和健康端口；已有 Runtime API key 可留空保留。也可运行 setup.cmd。
+macOS users can also double-click setup.command in Finder.
 
 向导自动下载官方客户端、校验 SHA-256 并生成 profile。新安装会创建本机配置；已有配置保留工作区、权限和认证令牌，默认复用现有客户端。向导只完成本地设置，ChatGPT 连接在后续步骤配置。
 

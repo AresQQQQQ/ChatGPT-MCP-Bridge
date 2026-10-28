@@ -22,6 +22,7 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "chooseFolder")
+        configuration.userContentController.addScriptMessageHandler(self, contentWorld: .page, name: "closeWizard")
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.underPageBackgroundColor = .windowBackgroundColor
@@ -145,6 +146,17 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         decisionHandler(.allow)
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+        if message.name == "closeWizard" {
+            guard message.frameInfo.isMainFrame, let source = origin,
+                  message.frameInfo.request.url?.host == source.host,
+                  message.frameInfo.request.url?.port == source.port else {
+                replyHandler(nil, "请求来源无效")
+                return
+            }
+            replyHandler(true, nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { NSApp.terminate(nil) }
+            return
+        }
         guard message.name == "chooseFolder", message.frameInfo.isMainFrame, let source = origin, message.frameInfo.request.url?.host == source.host, message.frameInfo.request.url?.port == source.port else { replyHandler(nil, "请求来源无效"); return }
         let picker = NSOpenPanel(); picker.title = "选择项目文件夹"; picker.prompt = "选择"; picker.canChooseFiles = false; picker.canChooseDirectories = true; picker.allowsMultipleSelection = false
         if let current = message.body as? String, !current.isEmpty { picker.directoryURL = URL(fileURLWithPath: current) }
