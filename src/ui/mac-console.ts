@@ -86,7 +86,7 @@ export async function launchMacControlUi(configPath: string, options: MacControl
       return splitSecret ? { ...log, message: "[分段输出中的鉴权内容已隐藏]" } : log;
     });
   }
-  await refreshSecrets((await readWorkspaceConfig(configPath)).key);
+  await refreshSecrets(await readFile(configPath, "utf8"));
 
   const close = (): Promise<void> => {
     if (closing) return closing;
@@ -128,7 +128,7 @@ export async function launchMacControlUi(configPath: string, options: MacControl
   }
   app.get("/api/snapshot", async (_req, res) => {
     const config = await readWorkspaceConfig(configPath);
-    await refreshSecrets(config.key);
+    await refreshSecrets(await readFile(configPath, "utf8"));
     const status = await controller.getStatus();
     const codexStatus = await controller.getCodexStatus().catch(() => ({ enabled: false, available: false, ipcConnected: false }));
     const bindings = status.state === "running"
@@ -157,7 +157,7 @@ export async function launchMacControlUi(configPath: string, options: MacControl
       else if (input.action === "save-config") {
         const config = await readWorkspaceConfig(configPath);
         if (revision(config.key) !== input.revision) throw new Error("配置已被其他程序修改，请重新载入");
-        await writeWorkspaceConfig(configPath, input.workspaces.map(item => ({ id: item.id, root: item.root, mode: item.mode, ...(item.originalId ? { originalId: item.originalId } : {}) })), config.key);
+        await writeWorkspaceConfig(configPath, input.workspaces.map(item => ({ id: item.id, root: item.root, mode: item.mode, ...(item.originalId ? { originalId: item.originalId } : {}) })), { expectedKey: config.key });
       } else if (input.action === "refresh-codex") await controller.getCodexModuleBindings(input.workspaceId, true);
       else if (input.action === "unbind-codex") await controller.unbindCodexModule(input.workspaceId, input.moduleId);
       else if (input.action === "local-mcp-load") await controller.loadLocalMcpServer(input.workspaceId, input.serverId);

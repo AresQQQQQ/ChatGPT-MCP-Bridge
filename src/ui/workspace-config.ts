@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { getCodexDefaultSettings, withCodexDefaultSettings, type CodexDefaultSettings } from "./codex-defaults-config.js";
 
 const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const DEFAULT_ALLOWED_SCRIPTS = ["test", "build", "lint", "typecheck"] as const;
@@ -29,9 +31,24 @@ export interface EditableWorkspace {
 
 export interface WorkspaceConfigSnapshot {
   readonly workspaces: readonly EditableWorkspace[];
+  readonly codexDefaults: CodexDefaultSettings;
   readonly key: string;
 }
 
+export interface WorkspaceConfigWriteOptions {
+  readonly expectedKey?: string;
+  readonly codexDefaults?: CodexDefaultSettings;
+}
+
+function configKey(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function staleConfigError(expectedContentOrOptions: string | WorkspaceConfigWriteOptions | undefined): Error {
+  return new Error(typeof expectedContentOrOptions === "string"
+    ? "\u914d\u7f6e\u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u8f7d\u5165"
+    : "\u914d\u7f6e\u5df2\u88ab\u5176\u4ed6\u64cd\u4f5c\u4fee\u6539\uff0c\u8bf7\u5173\u95ed\u5e76\u91cd\u65b0\u6253\u5f00\u63a7\u5236\u53f0\u540e\u91cd\u8bd5");
+}
 function parseRawConfig(content: string, configPath: string): RawConfig {
   let value: unknown;
   try {
@@ -65,6 +82,21 @@ function normalizeMode(mode: unknown): EditableWorkspaceMode {
   return typeof mode === "string" && (WORKSPACE_MODES as readonly string[]).includes(mode)
     ? mode as EditableWorkspaceMode
     : "workspace";
+}
+
+function matchesWorkspaceConfig(
+  existing: readonly RawWorkspace[],
+  requested: readonly EditableWorkspace[],
+  configPath: string,
+): boolean {
+  return existing.length === requested.length && existing.every((workspace, index) => {
+    const next = requested[index];
+    return next !== undefined
+      && workspace.id === next.id
+      && typeof workspace.root === "string"
+      && normalizeRoot(workspace.root, configPath) === next.root
+      && normalizeMode(workspace.mode) === next.mode;
+  });
 }
 
 function validateWorkspaceInput(workspaces: readonly EditableWorkspace[], configPath: string): EditableWorkspace[] {
@@ -117,17 +149,33 @@ export async function readWorkspaceConfig(configPath: string): Promise<Workspace
       mode: normalizeMode(workspace.mode),
     };
   });
-  return { workspaces, key: content };
+  return { workspaces, codexDefaults: getCodexDefaultSettings(config), key: configKey(content) };
 }
 
-export async function writeWorkspaceConfig(configPath: string, requested: readonly EditableWorkspace[], expectedContent?: string): Promise<void> {
+export async function writeWorkspaceConfig(
+  configPath: string,
+  requested: readonly EditableWorkspace[],
+  expectedContentOrOptions?: string | WorkspaceConfigWriteOptions,
+): Promise<void> {
   const validated = validateWorkspaceInput(requested, configPath);
   await ensureWorkspaceRoots(validated);
 
   const content = await readFile(configPath, "utf8");
-  if (expectedContent !== undefined && content !== expectedContent) throw new Error("配置已被其他程序修改，请重新载入");
-  const config = parseRawConfig(content, configPath);
+  const options = typeof expectedContentOrOptions === "object" && expectedContentOrOptions !== null
+    ? expectedContentOrOptions
+    : {};
+  const expectedKey = typeof expectedContentOrOptions === "string"
+    ? configKey(expectedContentOrOptions)
+    : options.expectedKey;
+  if (expectedKey !== undefined && configKey(content) !== expectedKey) {
+    throw staleConfigError(expectedContentOrOptions);
+  }
+  const parsedConfig = parseRawConfig(content, configPath);
+  const config = options.codexDefaults
+    ? withCodexDefaultSettings(parsedConfig, options.codexDefaults) as RawConfig
+    : parsedConfig;
   const existing = rawWorkspaces(config, configPath);
+  const workspacesUnchanged = matchesWorkspaceConfig(existing, validated, configPath);
   const byId = new Map<string, RawWorkspace>();
   for (const workspace of existing) {
     if (typeof workspace.id === "string") byId.set(workspace.id, workspace);
@@ -149,7 +197,7 @@ export async function writeWorkspaceConfig(configPath: string, requested: readon
     };
   });
 
-  const nextConfig = { ...config, workspaces: nextWorkspaces };
+  const nextConfig = { ...config, workspaces: workspacesUnchanged ? existing : nextWorkspaces };
   const serialized = `${JSON.stringify(nextConfig, null, 2)}\n`;
   const directory = path.dirname(configPath);
   await mkdir(directory, { recursive: true });
@@ -161,7 +209,9 @@ export async function writeWorkspaceConfig(configPath: string, requested: readon
     } finally {
       await handle.close();
     }
-    if (await readFile(configPath, "utf8") !== content) throw new Error("配置已被其他程序修改，请重新载入");
+    if (expectedKey !== undefined && configKey(await readFile(configPath, "utf8")) !== expectedKey) {
+      throw staleConfigError(expectedContentOrOptions);
+    }
     await rename(temporaryPath, configPath);
   } finally {
     await unlink(temporaryPath).catch(() => undefined);

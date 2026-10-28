@@ -323,6 +323,7 @@ function taskSnapshot(task: MutableTaskRecord): CodexTaskRecord {
 }
 
 export class CodexTaskManager {
+  private readonly config: BridgeConfig;
   private readonly client: CodexRpcClient;
   private readonly desktopClient: CodexDesktopClient;
   private readonly activationController: CodexDesktopActivationController;
@@ -343,6 +344,7 @@ export class CodexTaskManager {
   private readonly unsubscribeDesktop: () => void;
 
   public constructor(private readonly options: CodexTaskManagerOptions) {
+    this.config = options.config;
     this.client = options.client ?? new CodexAppServerClient({
       ...(options.config.codex?.clientPath ? { clientPath: options.config.codex.clientPath } : {}),
     });
@@ -378,7 +380,7 @@ export class CodexTaskManager {
   }
 
   public async getStatus(): Promise<{
-    readonly capabilities: typeof BRIDGE_CAPABILITIES;
+    readonly capabilities: Omit<typeof BRIDGE_CAPABILITIES, "codexDefaultModel" | "codexDefaultReasoningEffort"> & { readonly codexDefaultModel: string; readonly codexDefaultReasoningEffort: CodexReasoningEffort };
     readonly desktop: ReturnType<CodexDesktopClient["getStatus"]>;
     readonly bridge: { readonly activeTasks: number; readonly queuedTasks: number };
     readonly knownThreads: readonly { readonly workspaceId: string; readonly moduleId: string; readonly threadId: string; readonly ownerPresent: boolean }[];
@@ -395,7 +397,7 @@ export class CodexTaskManager {
         ownerPresent: this.knownOwnerState.get(record.threadId) ?? false,
       }));
     return {
-      capabilities: BRIDGE_CAPABILITIES,
+      capabilities: { ...BRIDGE_CAPABILITIES, codexDefaultModel: this.config.codex?.defaultModel ?? CODEX_DEFAULT_MODEL, codexDefaultReasoningEffort: this.config.codex?.defaultEffort ?? CODEX_DEFAULT_REASONING_EFFORT },
       desktop: this.desktopClient.getStatus(),
       bridge: {
         activeTasks: this.activeWorkspaceTask.size,
@@ -671,8 +673,8 @@ export class CodexTaskManager {
     instruction: string,
     requestId?: string,
     threadId?: string,
-    model: string = CODEX_DEFAULT_MODEL,
-    effort: CodexReasoningEffort = CODEX_DEFAULT_REASONING_EFFORT,
+    model: string = this.config.codex?.defaultModel ?? CODEX_DEFAULT_MODEL,
+    effort: CodexReasoningEffort = this.config.codex?.defaultEffort ?? CODEX_DEFAULT_REASONING_EFFORT,
   ): Promise<CodexTaskRecord> {
     await this.initialize();
     this.requireCodexWorkspace(workspaceId);
@@ -753,8 +755,8 @@ export class CodexTaskManager {
       instruction,
       requestId,
       previous.threadId,
-      model ?? previous.model ?? CODEX_DEFAULT_MODEL,
-      effort ?? previous.effort ?? CODEX_DEFAULT_REASONING_EFFORT,
+      model ?? previous.model ?? this.config.codex?.defaultModel ?? CODEX_DEFAULT_MODEL,
+      effort ?? previous.effort ?? this.config.codex?.defaultEffort ?? CODEX_DEFAULT_REASONING_EFFORT,
     );
   }
 
@@ -871,8 +873,8 @@ export class CodexTaskManager {
       cwd: this.canonicalRoot(workspaceId),
       clientUserMessageId: task.taskId,
       text: task.instruction.trim(),
-      model: task.model ?? CODEX_DEFAULT_MODEL,
-      effort: task.effort ?? CODEX_DEFAULT_REASONING_EFFORT,
+      model: task.model ?? this.config.codex?.defaultModel ?? CODEX_DEFAULT_MODEL,
+      effort: task.effort ?? this.config.codex?.defaultEffort ?? CODEX_DEFAULT_REASONING_EFFORT,
     }, owner);
     task.threadId = threadId;
     task.turnId = response.turnId;
@@ -992,7 +994,7 @@ export class CodexTaskManager {
         threadId,
         input: [{ type: "text", text: NEW_THREAD_BOOTSTRAP_INSTRUCTION, text_elements: [] }],
         cwd: this.canonicalRoot(workspaceId),
-        model: CODEX_DEFAULT_MODEL,
+        model: task.model ?? this.config.codex?.defaultModel ?? CODEX_DEFAULT_MODEL,
         effort: "low",
       });
       expectedTurnId = getNestedString(response, [["turn", "id"], ["turnId"], ["id"]]);

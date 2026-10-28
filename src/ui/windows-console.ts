@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_CONFIG_FILE } from "../config.js";
 import { BridgeController, type BridgeControllerStatus, type LogEntry } from "../control/bridge-controller.js";
 import { readWorkspaceConfig, writeWorkspaceConfig, type EditableWorkspace } from "./workspace-config.js";
+import type { CodexDefaultSettings } from "./codex-defaults-config.js";
 
 const REFRESH_INTERVAL_MS = 800;
 const COMMAND_POLL_INTERVAL_MS = 150;
@@ -272,6 +273,7 @@ public static class ModernFolderPicker
         </StackPanel>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+        <Button x:Name="SettingsButton" MinWidth="76" Margin="0,0,8,0" ToolTip="配置全局 Codex 默认模型和推理等级"><TextBlock Text="设置"/></Button>
         <Button x:Name="StartButton" MinWidth="104" Style="{StaticResource PrimaryButtonStyle}">
           <StackPanel Orientation="Horizontal"><Path Width="16" Height="16" Stretch="Uniform" Margin="0,0,7,0" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" Data="M17.2204 8.68703C18.2558 9.25661 18.2558 10.7434 17.2204 11.313L7.2234 16.812C6.22371 17.362 5 16.6393 5 15.4991L5 4.50093C5 3.36068 6.22371 2.63805 7.2234 3.18795L17.2204 8.68703ZM16.7381 10.4377C17.0833 10.2478 17.0833 9.7522 16.7381 9.56234L6.74113 4.06327C6.4079 3.87997 6 4.12084 6 4.50093L6 15.4991C6 15.8792 6.4079 16.12 6.74114 15.9367L16.7381 10.4377Z"/><TextBlock Text="启动服务" VerticalAlignment="Center"/></StackPanel>
         </Button>
@@ -286,6 +288,30 @@ public static class ModernFolderPicker
           </StackPanel>
         </Button>
       </StackPanel>
+      <Popup x:Name="SettingsPopup" Grid.Column="1" PlacementTarget="{Binding ElementName=SettingsButton}" Placement="Bottom" HorizontalOffset="-330" VerticalOffset="8" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+        <Border Width="440" Background="#FFFFFF" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="9" Padding="18">
+          <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.16" Color="#344054"/></Border.Effect>
+          <StackPanel>
+            <TextBlock Text="全局 Codex 默认值" FontSize="15" FontWeight="SemiBold" Foreground="#344054"/>
+            <TextBlock Text="停止 Bridge 后可编辑并保存，下次启动生效。" Margin="0,5,0,16" FontSize="11" Foreground="#667085"/>
+            <TextBlock Text="默认模型" Foreground="#667085" Margin="0,0,0,6"/>
+            <TextBox x:Name="CodexDefaultModelBox" ToolTip="例如 gpt-6-luna"/>
+            <TextBlock Text="推理等级" Foreground="#667085" Margin="0,14,0,6"/>
+            <ComboBox x:Name="CodexDefaultEffortBox">
+              <ComboBoxItem Content="None" Tag="none"/>
+              <ComboBoxItem Content="Minimal" Tag="minimal"/>
+              <ComboBoxItem Content="Low" Tag="low"/>
+              <ComboBoxItem Content="Medium" Tag="medium"/>
+              <ComboBoxItem Content="High" Tag="high"/>
+              <ComboBoxItem Content="Extra high" Tag="xhigh"/>
+              <ComboBoxItem Content="Max" Tag="max"/>
+              <ComboBoxItem Content="Ultra" Tag="ultra"/>
+            </ComboBox>
+            <TextBlock Text="{Binding Text, ElementName=ConfigStatus}" Margin="0,12,0,0" Foreground="#667085" TextWrapping="Wrap"/>
+            <Button x:Name="SaveGlobalConfigButton" MinWidth="104" Margin="0,14,0,0" HorizontalAlignment="Right" Style="{StaticResource PrimaryButtonStyle}"><TextBlock Text="保存配置"/></Button>
+          </StackPanel>
+        </Border>
+      </Popup>
       <Popup x:Name="LocalMcpPopup" Grid.Column="1" PlacementTarget="{Binding ElementName=LocalMcpButton}" Placement="Bottom" HorizontalOffset="-388" VerticalOffset="8" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
         <Border Width="520" Background="#FFFFFF" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="9" Padding="16">
           <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.16" Color="#344054"/></Border.Effect>
@@ -669,6 +695,8 @@ $window = [Windows.Markup.XamlReader]::Load($reader)
 $titleLogoImage = $window.FindName('TitleLogoImage'); $chatGptLogoImage = $window.FindName('ChatGptLogoImage'); $tunnelLogoImage = $window.FindName('TunnelLogoImage'); $mcpLogoImage = $window.FindName('McpLogoImage'); $mcpBridgeLogoImage = $window.FindName('McpBridgeLogoImage'); $codexDesktopLogoImage = $window.FindName('CodexDesktopLogoImage')
 $startButton = $window.FindName('StartButton'); $stopButton = $window.FindName('StopButton')
 $localMcpButton = $window.FindName('LocalMcpButton'); $localMcpCountText = $window.FindName('LocalMcpCountText'); $localMcpPopup = $window.FindName('LocalMcpPopup'); $localMcpList = $window.FindName('LocalMcpList'); $localMcpSummaryText = $window.FindName('LocalMcpSummaryText'); $localMcpEmptyText = $window.FindName('LocalMcpEmptyText'); $localMcpMessage = $window.FindName('LocalMcpMessage'); $localMcpProbeButton = $window.FindName('LocalMcpProbeButton'); $localMcpLoadButton = $window.FindName('LocalMcpLoadButton'); $localMcpUnloadButton = $window.FindName('LocalMcpUnloadButton')
+$codexDefaultModelBox = $window.FindName('CodexDefaultModelBox'); $codexDefaultEffortBox = $window.FindName('CodexDefaultEffortBox'); $saveGlobalConfigButton = $window.FindName('SaveGlobalConfigButton')
+$settingsButton = $window.FindName('SettingsButton'); $settingsPopup = $window.FindName('SettingsPopup')
 $bridgeValue = $window.FindName('BridgeValue'); $mcpValue = $window.FindName('McpValue'); $tunnelValue = $window.FindName('TunnelValue'); $codexValue = $window.FindName('CodexValue')
 $bridgeDot = $window.FindName('BridgeDot'); $mcpDot = $window.FindName('McpDot'); $tunnelDot = $window.FindName('TunnelDot'); $codexDot = $window.FindName('CodexDot')
 $bridgeMeta = $window.FindName('BridgeMeta'); $mcpMeta = $window.FindName('McpMeta'); $tunnelMeta = $window.FindName('TunnelMeta'); $codexMeta = $window.FindName('CodexMeta')
@@ -707,6 +735,7 @@ $softGreen = $brushConverter.ConvertFromString('#ECFDF3'); $softAmber = $brushCo
  $projectIconGeometry = $window.Resources['IconProject']; $persistentModuleIconGeometry = $window.Resources['IconPersistentModule']; $temporaryModuleIconGeometry = $window.Resources['IconTemporaryModule']
 
 $script:lastSnapshot = ''; $script:lastLogKey = ''; $script:lastConfigKey = ''; $script:lastTreeKey = ''; $script:busy = $false; $script:configDirty = $false; $script:currentState = 'stopped'; $script:updatingProjectEditor = $false
+$script:updatingCodexDefaults = $false
 $script:workspaceTable = New-Object System.Data.DataTable
 [void]$script:workspaceTable.Columns.Add('originalId', [string]); [void]$script:workspaceTable.Columns.Add('id', [string]); [void]$script:workspaceTable.Columns.Add('root', [string]); [void]$script:workspaceTable.Columns.Add('mode', [string])
 $script:selectedModule = $null; $script:selectedProjectRow = $null; $script:selectedWorkspaceId = ''; $script:selectedModuleId = ''; $script:selectedLocalMcp = $null; $script:lastLocalMcpKey = ''
@@ -729,18 +758,28 @@ function Select-ModeItem([string]$mode) {
 }
 function Set-ConfigEnabled([bool]$enabled) {
   $projectIdBox.IsReadOnly = -not $enabled; $projectPathBox.IsReadOnly = -not $enabled; $projectModeBox.IsEnabled = $enabled
+  $codexDefaultModelBox.IsReadOnly = -not $enabled; $codexDefaultEffortBox.IsEnabled = $enabled
+  $saveGlobalConfigButton.IsEnabled = $enabled -and $script:configDirty -and -not $script:busy
   $hasProject = $null -ne $script:selectedProjectRow
   $addWorkspaceButton.IsEnabled = $enabled; $deleteWorkspaceButton.IsEnabled = $enabled -and $hasProject; $browseWorkspaceButton.IsEnabled = $enabled -and $hasProject; $saveConfigButton.IsEnabled = $enabled -and $hasProject -and -not $script:busy
   $projectReadOnlyPanel.Visibility = if($enabled){'Collapsed'}else{'Visible'}; $projectEditPanel.Visibility = if($enabled){'Visible'}else{'Collapsed'}; $projectButtonBar.Visibility = if($enabled -and $hasProject){'Visible'}else{'Collapsed'}
   $projectModeBadge.Visibility = if($hasProject){'Visible'}else{'Collapsed'}
   if($hasProject){
     $mode=[string]$script:selectedProjectRow.mode
-    $projectModeText.Text=Get-ModeLabel $mode
+    $modeLabel=Get-ModeLabel $mode
+    if($enabled -and $script:configDirty){$modeLabel += ' · 未保存'}
+    $projectModeText.Text=$modeLabel
     if($mode -eq 'trusted-dev'){ $projectModeText.Foreground=$amber; $projectModeBadge.Background=$softAmber }
     elseif($mode -eq 'readonly'){ $projectModeText.Foreground=$textSecondary; $projectModeBadge.Background=$softGray }
     else{ $projectModeText.Foreground=$accent; $projectModeBadge.Background=$softBlue }
-    $projectModeBadge.ToolTip=if($enabled){'Bridge 已停止，可以修改 Workspace 权限模式。'}else{'当前 Workspace 权限模式；停止 Bridge 后可以修改。'}
+    $projectModeBadge.ToolTip=if($enabled -and $script:configDirty){'当前显示的是未保存配置；保存后才会用于下次启动。'}elseif($enabled){'Bridge 已停止，可以修改 Workspace 权限模式。'}else{'当前 Workspace 权限模式；停止 Bridge 后可以修改。'}
   }
+}
+function Mark-ConfigDirty {
+  $script:configDirty=$true
+  $configStatus.Text='有未保存修改'
+  if($script:currentState -eq 'stopped'){$startButton.IsEnabled=$false}
+  Set-ConfigEnabled ($script:currentState -eq 'stopped')
 }
 function Show-ProjectActions($row) {
   $script:selectedModule=$null; $script:selectedModuleId=''; $script:selectedProjectRow=$row; $script:selectedWorkspaceId=if($null -ne $row){[string]$row.id}else{''}
@@ -799,7 +838,7 @@ function Update-Status($status) {
   if ($null -ne $status.startedAt -and [string]$status.startedAt -ne '') { try { $startedValue.Text = '启动于 ' + ([DateTimeOffset]::Parse([string]$status.startedAt).LocalDateTime.ToString('HH:mm:ss')) } catch { $startedValue.Text = '' } } else { $startedValue.Text = '' }
   if ($null -ne $status.error -and [string]$status.error -ne '') { $errorValue.Text = '错误：' + [string]$status.error; $errorValue.Visibility = 'Visible' } else { $errorValue.Text = ''; $errorValue.Visibility = 'Collapsed' }
   $transitioning = $state -eq 'starting' -or $state -eq 'stopping'; if (-not $transitioning) { $script:busy = $false }
-  $startButton.IsEnabled = -not $script:busy -and -not $transitioning -and $state -ne 'running'; $stopButton.IsEnabled = -not $script:busy -and -not $transitioning -and $state -ne 'stopped'
+  $startButton.IsEnabled = -not $script:busy -and -not $script:configDirty -and -not $transitioning -and $state -ne 'running'; $stopButton.IsEnabled = -not $script:busy -and -not $transitioning -and $state -ne 'stopped'
   $startButton.Visibility = if($state -eq 'running' -or $transitioning){'Collapsed'}else{'Visible'}; $stopButton.Visibility = if($state -eq 'running' -or $transitioning){'Visible'}else{'Collapsed'}
   Set-ConfigEnabled ($state -eq 'stopped')
 }
@@ -928,6 +967,11 @@ function Update-Workspaces($message) {
   if($key -ne $script:lastConfigKey -and -not $script:configDirty){
     $script:lastConfigKey=$key; $script:workspaceTable.Rows.Clear()
     foreach($workspace in $message.workspaces){$row=$script:workspaceTable.NewRow(); $row.originalId=[string]$workspace.originalId; $row.id=[string]$workspace.id; $row.root=[string]$workspace.root; $row.mode=[string]$workspace.mode; [void]$script:workspaceTable.Rows.Add($row)}
+    $script:updatingCodexDefaults=$true
+    $codexDefaultModelBox.Text=[string]$message.codexDefaults.defaultModel
+    $codexEffort=[string]$message.codexDefaults.defaultEffort; $codexDefaultEffortBox.SelectedIndex=-1
+    foreach($item in $codexDefaultEffortBox.Items){if([string]$item.Tag -eq $codexEffort){$codexDefaultEffortBox.SelectedItem=$item;break}}
+    $script:updatingCodexDefaults=$false
   }
   Build-ProjectTree $message.codexBindings
 }
@@ -958,7 +1002,7 @@ function Read-Snapshot {
     Update-OverallStatus $message.status $message.codexStatus
     Update-LocalMcpServers $message
     Update-Logs $message
-    if($null -ne $message.configMessage -and [string]$message.configMessage -ne ''){$configStatus.Text=[string]$message.configMessage; if(([string]$message.configMessage).StartsWith('配置已保存')){$script:configDirty=$false; $script:lastConfigKey=''}}
+    if($null -ne $message.configMessage -and [string]$message.configMessage -ne ''){$configStatus.Text=[string]$message.configMessage; if(([string]$message.configMessage).StartsWith('配置已保存')){$script:configDirty=$false; $script:lastConfigKey=''; Set-ConfigEnabled ($script:currentState -eq 'stopped'); if($script:currentState -eq 'stopped' -and -not $script:busy){$startButton.IsEnabled=$true}}}
     Update-Workspaces $message
     Update-CodexBindings $message
   } catch {
@@ -975,37 +1019,51 @@ $projectTree.Add_SelectedItemChanged({
 })
 $projectIdBox.Add_TextChanged({
   if($script:updatingProjectEditor -or $script:currentState -ne 'stopped' -or $null -eq $script:selectedProjectRow){return}
-  $script:selectedProjectRow.id=$projectIdBox.Text; $script:selectedWorkspaceId=$projectIdBox.Text; $script:configDirty=$true; $configStatus.Text='有未保存修改'
+  $script:selectedProjectRow.id=$projectIdBox.Text; $script:selectedWorkspaceId=$projectIdBox.Text; Mark-ConfigDirty
 })
 $projectPathBox.Add_TextChanged({
   if($script:updatingProjectEditor -or $script:currentState -ne 'stopped' -or $null -eq $script:selectedProjectRow){return}
-  $script:selectedProjectRow.root=$projectPathBox.Text; $script:configDirty=$true; $configStatus.Text='有未保存修改'
+  $script:selectedProjectRow.root=$projectPathBox.Text; Mark-ConfigDirty
 })
 $projectModeBox.Add_SelectionChanged({
   if($script:updatingProjectEditor -or $script:currentState -ne 'stopped' -or $null -eq $script:selectedProjectRow -or $null -eq $projectModeBox.SelectedItem){return}
-  $script:selectedProjectRow.mode=[string]$projectModeBox.SelectedItem.Tag; $script:configDirty=$true; $configStatus.Text='有未保存修改'; Set-ConfigEnabled $true; Build-ProjectTree (Get-CurrentBindings)
+  $script:selectedProjectRow.mode=[string]$projectModeBox.SelectedItem.Tag; Mark-ConfigDirty; Build-ProjectTree (Get-CurrentBindings)
+})
+$codexDefaultModelBox.Add_TextChanged({
+  if($script:updatingCodexDefaults -or $script:currentState -ne 'stopped'){return}
+  Mark-ConfigDirty
+})
+$codexDefaultEffortBox.Add_SelectionChanged({
+  if($script:updatingCodexDefaults -or $script:currentState -ne 'stopped' -or $null -eq $codexDefaultEffortBox.SelectedItem){return}
+  Mark-ConfigDirty
 })
 $addWorkspaceButton.Add_Click({
   if($script:currentState -ne 'stopped'){return}
   $selectedPath=Select-ProjectFolder ''; if([string]::IsNullOrWhiteSpace($selectedPath)){return}
   $row=$script:workspaceTable.NewRow(); $row.originalId=''; $row.id=Get-AutoProjectId $selectedPath; $row.root=$selectedPath; $row.mode='workspace'; [void]$script:workspaceTable.Rows.Add($row)
-  $script:selectedWorkspaceId=[string]$row.id; $script:selectedModuleId=''; $script:configDirty=$true; $configStatus.Text='有未保存修改'; Build-ProjectTree (Get-CurrentBindings)
+  $script:selectedWorkspaceId=[string]$row.id; $script:selectedModuleId=''; Mark-ConfigDirty; Build-ProjectTree (Get-CurrentBindings)
 })
 $deleteWorkspaceButton.Add_Click({
   if($script:currentState -ne 'stopped' -or $null -eq $script:selectedProjectRow){return}
   $activeRows=@($script:workspaceTable.Rows|Where-Object{$_.RowState -ne [System.Data.DataRowState]::Deleted}); if($activeRows.Count -le 1){[Windows.MessageBox]::Show('至少保留一个项目配置。','MCP Bridge 控制台')|Out-Null; return}
-  $script:selectedProjectRow.Delete(); $script:selectedProjectRow=$null; $script:selectedWorkspaceId=''; $script:configDirty=$true; $configStatus.Text='有未保存修改'; Build-ProjectTree (Get-CurrentBindings); Show-ProjectActions $null
+  $script:selectedProjectRow.Delete(); $script:selectedProjectRow=$null; $script:selectedWorkspaceId=''; Mark-ConfigDirty; Build-ProjectTree (Get-CurrentBindings); Show-ProjectActions $null
 })
 $browseWorkspaceButton.Add_Click({
   if($script:currentState -ne 'stopped' -or $null -eq $script:selectedProjectRow){return}
   $selectedPath=Select-ProjectFolder ([string]$script:selectedProjectRow.root)
-  if(-not [string]::IsNullOrWhiteSpace($selectedPath)){$script:selectedProjectRow.root=$selectedPath; $script:updatingProjectEditor=$true; $projectPathBox.Text=$selectedPath; $script:updatingProjectEditor=$false; $script:configDirty=$true; $configStatus.Text='有未保存修改'; Build-ProjectTree (Get-CurrentBindings)}
+  if(-not [string]::IsNullOrWhiteSpace($selectedPath)){$script:selectedProjectRow.root=$selectedPath; $script:updatingProjectEditor=$true; $projectPathBox.Text=$selectedPath; $script:updatingProjectEditor=$false; Mark-ConfigDirty; Build-ProjectTree (Get-CurrentBindings)}
 })
-$saveConfigButton.Add_Click({
+function Save-Config {
   if($script:currentState -ne 'stopped' -or $script:busy){return}
+  if(-not $script:configDirty){$configStatus.Text='没有未保存修改';return}
+  if([string]::IsNullOrEmpty($script:lastConfigKey)){$configStatus.Text='读取配置快照失败，请重新打开控制台后重试';return}
+  if($null -eq $codexDefaultEffortBox.SelectedItem){$configStatus.Text='请选择有效的 Codex 推理等级';return}
   $items=@(); foreach($row in $script:workspaceTable.Rows){if($row.RowState -eq [System.Data.DataRowState]::Deleted){continue}; $items += @{originalId=[string]$row.originalId;id=[string]$row.id;root=[string]$row.root;mode=[string]$row.mode}}
-  $payload=@{workspaces=$items}|ConvertTo-Json -Depth 5 -Compress; $utf8NoBom=New-Object Text.UTF8Encoding($false); [IO.File]::WriteAllText($ConfigEditPath,$payload,$utf8NoBom); $script:busy=$true; $saveConfigButton.IsEnabled=$false; $configStatus.Text='正在保存…'; Send-Command 'save-config'
-})
+  $payload=@{workspaces=$items;codexDefaults=@{defaultModel=[string]$codexDefaultModelBox.Text;defaultEffort=[string]$codexDefaultEffortBox.SelectedItem.Tag};expectedKey=$script:lastConfigKey}|ConvertTo-Json -Depth 5 -Compress
+  $utf8NoBom=New-Object Text.UTF8Encoding($false); [IO.File]::WriteAllText($ConfigEditPath,$payload,$utf8NoBom); $script:busy=$true; $saveConfigButton.IsEnabled=$false; $saveGlobalConfigButton.IsEnabled=$false; $configStatus.Text='正在保存…'; Send-Command 'save-config'
+}
+$saveConfigButton.Add_Click({Save-Config})
+$saveGlobalConfigButton.Add_Click({Save-Config})
 $refreshCodexButton.Add_Click({ if($script:currentState -ne 'running' -or $null -eq $script:selectedModule){return}; $workspaceId=[string]$script:selectedModule.workspaceId; $codexBindingStatus.Text='正在刷新 Codex 绑定状态…'; Send-Command ('refresh-codex:'+$workspaceId) })
 $unbindCodexButton.Add_Click({
   if($script:currentState -ne 'running' -or $null -eq $script:selectedModule){return}
@@ -1015,7 +1073,8 @@ $unbindCodexButton.Add_Click({
   if($result -ne [Windows.MessageBoxResult]::Yes){return}
   $codexBindingStatus.Text='正在解除绑定…'; Send-Command ('unbind-codex:'+[string]$item.workspaceId+':'+[string]$item.moduleId)
 })
-$localMcpButton.Add_Click({ $localMcpPopup.IsOpen = -not $localMcpPopup.IsOpen })
+$settingsButton.Add_Click({ $localMcpPopup.IsOpen=$false; $settingsPopup.IsOpen = -not $settingsPopup.IsOpen })
+$localMcpButton.Add_Click({ $settingsPopup.IsOpen=$false; $localMcpPopup.IsOpen = -not $localMcpPopup.IsOpen })
 $localMcpList.Add_SelectionChanged({ Update-LocalMcpSelection })
 $localMcpProbeButton.Add_Click({
   $item=$localMcpList.SelectedItem; if($script:currentState -ne 'running' -or $null -eq $item){return}
@@ -1029,7 +1088,7 @@ $localMcpUnloadButton.Add_Click({
   $item=$localMcpList.SelectedItem; if($script:currentState -ne 'running' -or $null -eq $item){return}
   $localMcpProbeButton.IsEnabled=$false; $localMcpLoadButton.IsEnabled=$false; $localMcpUnloadButton.IsEnabled=$false; $localMcpMessage.Text='正在卸载 '+[string]$item.workspaceId+' / '+[string]$item.serverId+'…'; Send-Command ('local-mcp-unload:'+[string]$item.workspaceId+':'+[string]$item.serverId)
 })
-$startButton.Add_Click({ if($script:busy){return}; $script:busy=$true; $startButton.IsEnabled=$false; $stopButton.IsEnabled=$false; Send-Command 'start' })
+$startButton.Add_Click({ if($script:busy){return}; if($script:configDirty){$configStatus.Text='有未保存修改，请先保存配置后再启动'; $startButton.IsEnabled=$false; return}; $script:busy=$true; $startButton.IsEnabled=$false; $stopButton.IsEnabled=$false; Send-Command 'start' })
 $stopButton.Add_Click({ if($script:busy){return}; $script:busy=$true; $startButton.IsEnabled=$false; $stopButton.IsEnabled=$false; Send-Command 'stop' })
 $window.Add_Closed({ try{Send-Command 'close'}catch{} })
 
@@ -1042,6 +1101,7 @@ interface SnapshotMessage {
   readonly logs: readonly LogEntry[];
   readonly logKey: string;
   readonly workspaces: readonly EditableWorkspace[];
+  readonly codexDefaults: CodexDefaultSettings;
   readonly configKey: string;
   readonly codexStatus: { readonly enabled: boolean; readonly available: boolean; readonly ipcConnected: boolean };
   readonly codexBindings: readonly import("../codex/codex-tasks.js").CodexModuleView[];
@@ -1051,7 +1111,7 @@ interface SnapshotMessage {
   readonly localMcpMessage?: string;
 }
 
-interface ConfigEditPayload { readonly workspaces?: unknown }
+interface ConfigEditPayload { readonly workspaces?: unknown; readonly codexDefaults?: unknown; readonly expectedKey?: unknown }
 export interface LocalControlUi { close(): Promise<void> }
 
 function resolvePowerShell(): string {
@@ -1075,6 +1135,22 @@ function parseWorkspacePayload(value: unknown): EditableWorkspace[] {
   const workspaces=(value as ConfigEditPayload).workspaces; if(!Array.isArray(workspaces))throw new Error("项目配置数据无效");
   const validModes=new Set(["readonly","workspace","trusted-dev","handoff"]);
   return workspaces.map((item)=>{ if(typeof item!=="object"||item===null||Array.isArray(item))throw new Error("项目配置数据无效"); const record=item as Record<string,unknown>; if(typeof record.id!=="string"||typeof record.root!=="string")throw new Error("项目 ID 或路径无效"); if(typeof record.mode!=="string"||!validModes.has(record.mode))throw new Error("项目权限模式无效"); return { ...(typeof record.originalId==="string"&&record.originalId?{originalId:record.originalId}:{}), id:record.id, root:record.root, mode:record.mode as EditableWorkspace["mode"] } });
+}
+function parseConfigEditPayload(value: unknown): { readonly workspaces: EditableWorkspace[]; readonly codexDefaults: CodexDefaultSettings; readonly expectedKey: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("配置数据无效");
+  const payload = value as ConfigEditPayload;
+  if (typeof payload.expectedKey !== "string" || !/^[a-f0-9]{64}$/u.test(payload.expectedKey)) throw new Error("配置快照无效，请重新打开控制台后重试");
+  if (typeof payload.codexDefaults !== "object" || payload.codexDefaults === null || Array.isArray(payload.codexDefaults)) throw new Error("Codex 默认设置无效");
+  const defaults = payload.codexDefaults as Record<string, unknown>;
+  if (typeof defaults.defaultModel !== "string" || typeof defaults.defaultEffort !== "string") throw new Error("Codex 默认设置无效");
+  return {
+    workspaces: parseWorkspacePayload(value),
+    codexDefaults: {
+      defaultModel: defaults.defaultModel,
+      defaultEffort: defaults.defaultEffort as CodexDefaultSettings["defaultEffort"],
+    },
+    expectedKey: payload.expectedKey,
+  };
 }
 
 export async function launchLocalControlUi(configPath = path.resolve(process.cwd(), DEFAULT_CONFIG_FILE)): Promise<LocalControlUi> {
@@ -1107,7 +1183,7 @@ export async function launchLocalControlUi(configPath = path.resolve(process.cwd
         : [];
       const localMcpServers=await controller.getLocalMcpServers().catch(()=>[]);
       const localMcpKey=JSON.stringify({state:status.state,servers:localMcpServers});
-      const message:SnapshotMessage={type:"snapshot",status,logs,logKey:logKey(logs),workspaces:workspaceConfig.workspaces,configKey:workspaceConfig.key,codexStatus,codexBindings,localMcpServers,localMcpKey,...(configMessage?{configMessage}:{}),...(localMcpMessage?{localMcpMessage}:{})};
+      const message:SnapshotMessage={type:"snapshot",status,logs,logKey:logKey(logs),workspaces:workspaceConfig.workspaces,codexDefaults:workspaceConfig.codexDefaults,configKey:workspaceConfig.key,codexStatus,codexBindings,localMcpServers,localMcpKey,...(configMessage?{configMessage}:{}),...(localMcpMessage?{localMcpMessage}:{})};
       try{
         await writeFile(snapshotTempPath,JSON.stringify(message),"utf8");
         await rename(snapshotTempPath,snapshotPath);
@@ -1152,7 +1228,7 @@ export async function launchLocalControlUi(configPath = path.resolve(process.cwd
     }
     if(command==="save-config"){
       if(controller.lifecycleState!=="stopped"){configMessage="请先停止 Bridge 再保存配置"; await writeSnapshot(); return}
-      try{ const rawPayload=(await readFile(configEditPath,"utf8")).replace(/^\uFEFF/u,""); const payload=JSON.parse(rawPayload) as unknown; const workspaces=parseWorkspacePayload(payload); await writeWorkspaceConfig(configPath,workspaces); configMessage="配置已保存"; controller.addLog("controller","stdout","项目配置已保存"); }catch(error){ configMessage=`保存失败：${error instanceof Error?error.message:String(error)}`; controller.addLog("controller","stderr",configMessage) }
+      try{ const rawPayload=(await readFile(configEditPath,"utf8")).replace(/^\uFEFF/u,""); const payload=parseConfigEditPayload(JSON.parse(rawPayload) as unknown); await writeWorkspaceConfig(configPath,payload.workspaces,{expectedKey:payload.expectedKey,codexDefaults:payload.codexDefaults}); configMessage="配置已保存"; controller.addLog("controller","stdout","项目与 Codex 默认配置已保存"); }catch(error){ configMessage=`保存失败：${error instanceof Error?error.message:String(error)}`; controller.addLog("controller","stderr",configMessage) }
       await writeSnapshot(); return
     }
     configMessage=""; localMcpMessage=""; const operation=command==="start"?controller.start():controller.stop(); await writeSnapshot(); await operation.catch(()=>undefined); await writeSnapshot();

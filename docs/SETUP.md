@@ -42,10 +42,10 @@ Bridge 会自动把本地 Bearer 认证头传给隧道客户端。等待 Bridge 
 
 ## macOS Apple Silicon
 
-Mac 版源码位于 `feat/macos-arm64` 分支。在 Mac 本地 SSD 上 clone 该分支，不在 SMB 共享盘运行依赖、Git 或 Tunnel：
+Mac 版源码位于 `main` 分支。在 Mac 本地 SSD 上 clone 该分支，不在 SMB 共享盘运行依赖、Git 或 Tunnel：
 
 ```sh
-git clone --branch feat/macos-arm64 https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
+git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
 cd ChatGPT-MCP-Bridge
 pnpm install --frozen-lockfile
 pnpm build

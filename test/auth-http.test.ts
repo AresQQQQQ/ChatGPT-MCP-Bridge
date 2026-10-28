@@ -117,7 +117,7 @@ test("MCP HTTP enforces exact Host/Origin and Bearer authentication", async () =
     try {
       await client.connect(transport);
       const tools = await client.listTools();
-      assert.equal(tools.tools.length, 55);
+      assert.equal(tools.tools.length, 65);
       assert.ok(tools.tools.every((tool) => tool.outputSchema !== undefined));
       const applyPatch = tools.tools.find((tool) => tool.name === "apply_patch");
       assert.equal(applyPatch?.annotations?.destructiveHint, true);
@@ -134,7 +134,7 @@ test("MCP HTTP enforces exact Host/Origin and Bearer authentication", async () =
         codexStateVersion: 4,
         codexModuleModel: "configured-temporary-single-binding",
         codexExecutionTransport: "desktop-ipc",
-        codexDefaultModel: "gpt-5.6-luna",
+        codexDefaultModel: "gpt-6-luna",
         codexDefaultReasoningEffort: "max",
       },
     });

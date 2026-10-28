@@ -33,6 +33,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^5.2.1",
+    "node-pty": "1.2.0-beta.18",
     "pdfjs-dist": "6.1.200",
     "zod": "^4.1.12"
   },

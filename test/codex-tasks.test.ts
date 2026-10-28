@@ -319,6 +319,8 @@ async function fixture(clientOptions: {
   readonly lazyRollout?: boolean;
   readonly bootstrapCompletionDelayMs?: number;
   readonly threadListDelayMs?: number;
+  readonly defaultModel?: string;
+  readonly defaultEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-codex-"));
   await mkdir(path.join(root, "src"));
@@ -328,6 +330,13 @@ async function fixture(clientOptions: {
     port: 3000,
     mcpPath: "/mcp",
     maxReadBytes: 1024 * 1024,
+    ...(clientOptions.defaultModel !== undefined || clientOptions.defaultEffort !== undefined ? {
+      codex: {
+        defaultModel: clientOptions.defaultModel ?? "gpt-6-luna",
+        defaultEffort: clientOptions.defaultEffort ?? "max",
+        stateFile: path.join(root, "codex-state.json"),
+      },
+    } : {}),
     workspaces: [{
       id: "demo",
       root,
@@ -341,6 +350,7 @@ async function fixture(clientOptions: {
     port: config.port,
     mcpPath: config.mcpPath,
     maxReadBytes: config.maxReadBytes,
+    ...(config.codex ? { codex: config.codex } : {}),
     workspaces: config.workspaces,
   }, null, 2)}\n`, "utf8");
   const registry = await WorkspaceRegistry.create(config);
@@ -411,7 +421,7 @@ test("Codex tasks execute through Desktop IPC, let ChatGPT choose threads, queue
     await waitFor(() => desktop.calls.some((call) => call.method === "startTurn"));
     const runningFirst = await manager.getTask("demo", first.taskId);
     assert.equal(runningFirst.status, "running");
-    assert.equal(runningFirst.model, "gpt-5.6-luna");
+    assert.equal(runningFirst.model, "gpt-6-luna");
     assert.equal(runningFirst.effort, "max");
     assert.ok(runningFirst.threadId);
     assert.ok(runningFirst.turnId);
@@ -427,7 +437,7 @@ test("Codex tasks execute through Desktop IPC, let ChatGPT choose threads, queue
     assert.doesNotMatch(firstTurn?.input?.text ?? "", /Do not commit or push/u);
     assert.equal(firstTurn?.input?.clientUserMessageId, first.taskId);
     assert.equal(firstTurn?.input?.cwd, canonicalRoot);
-    assert.equal(firstTurn?.input?.model, "gpt-5.6-luna");
+    assert.equal(firstTurn?.input?.model, "gpt-6-luna");
     assert.equal(firstTurn?.input?.effort, "max");
     assert.equal(firstTurn?.input?.outputSchema, undefined);
     assert.equal(firstTurn?.ownerClientId, "desktop-owner");
@@ -514,6 +524,46 @@ test("Codex lazy-rollout new threads use an internal no-op bootstrap before the 
     assert.equal(runningSecond.status, "running");
     assert.equal(runningSecond.threadId, completed.threadId);
     assert.equal(client.calls.filter((call) => call.method === "turn/start").length, 1, "bootstrap is performed only once for the new thread");
+  } finally {
+    await manager.close();
+  }
+});
+
+test("Codex configured defaults appear in status and drive the task, bootstrap, and continuation", async () => {
+  const { client, desktop, manager } = await fixture({
+    lazyRollout: true,
+    bootstrapCompletionDelayMs: 40,
+    defaultModel: "gpt-6-luna",
+    defaultEffort: "high",
+  });
+  try {
+    const status = await manager.getStatus();
+    assert.equal(status.capabilities.codexDefaultModel, "gpt-6-luna");
+    assert.equal(status.capabilities.codexDefaultReasoningEffort, "high");
+
+    const first = await manager.submitTask("demo", "media", "Use the configured defaults", "configured-defaults-1");
+    await waitFor(() => desktop.calls.some((call) => call.method === "startTurn"));
+    const runningFirst = await manager.getTask("demo", first.taskId);
+    assert.equal(runningFirst.model, "gpt-6-luna");
+    assert.equal(runningFirst.effort, "high");
+    const bootstrapTurn = client.calls.find((call) => call.method === "turn/start");
+    assert.ok(bootstrapTurn);
+    assert.equal(bootstrapTurn.params.model, "gpt-6-luna");
+    assert.equal(bootstrapTurn.params.effort, "low", "the internal bootstrap keeps its lightweight effort");
+    const realTurn = desktop.calls.find((call) => call.method === "startTurn");
+    assert.equal(realTurn?.input?.model, "gpt-6-luna");
+    assert.equal(realTurn?.input?.effort, "high");
+
+    desktop.emitCompletion(runningFirst.threadId!, runningFirst.turnId!, "completed", "configured task completed");
+    await waitFor(() => manager.getTask("demo", first.taskId).then((task) => task.status === "completed"));
+    const continued = await manager.continueTask("demo", first.taskId, "Continue with the same settings", "configured-defaults-2");
+    await waitFor(() => desktop.calls.filter((call) => call.method === "startTurn").length === 2);
+    const continuedTask = await manager.getTask("demo", continued.taskId);
+    assert.equal(continuedTask.model, "gpt-6-luna");
+    assert.equal(continuedTask.effort, "high");
+    const continuedTurn = desktop.calls.filter((call) => call.method === "startTurn")[1];
+    assert.equal(continuedTurn?.input?.model, "gpt-6-luna");
+    assert.equal(continuedTurn?.input?.effort, "high");
   } finally {
     await manager.close();
   }

@@ -78,6 +78,7 @@ test("workspace config rejects duplicate ids, invalid ids, missing folders, and 
   }
 });
 
+
 test("workspace config refuses a stale expected document without overwriting it", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "bridge-workspace-cas-"));
   try {
@@ -88,4 +89,86 @@ test("workspace config refuses a stale expected document without overwriting it"
     await assert.rejects(writeWorkspaceConfig(configPath, [{ originalId: "mac", id: "renamed", root, mode: "workspace" }], original), /其他程序修改/);
     assert.equal(await readFile(configPath, "utf8"), updated);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test("workspace config saves global Codex defaults while preserving the rest of mcp-bridge.json", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bridge-workspace-codex-defaults-"));
+  try {
+    const workspaceRoot = path.join(root, "project");
+    await mkdir(workspaceRoot);
+    const configPath = path.join(root, "mcp-bridge.json");
+    await writeFile(configPath, JSON.stringify({
+      host: "127.0.0.1",
+      auth: { token: "keep-this-token" },
+      tunnel: { profile: "keep-this-profile" },
+      codex: { clientPath: "tools/codex.exe", customOption: "keep-this-option" },
+      workspaces: [{ id: "demo", root: "project", mode: "workspace", allowedScripts: ["test"], custom: "keep-this-workspace-field" }],
+    }, null, 2), "utf8");
+
+    const snapshot = await readWorkspaceConfig(configPath);
+    await writeWorkspaceConfig(configPath, snapshot.workspaces, {
+      expectedKey: snapshot.key,
+      codexDefaults: { defaultModel: "gpt-6-luna", defaultEffort: "high" },
+    });
+
+    const saved = JSON.parse(await readFile(configPath, "utf8")) as {
+      readonly host: string;
+      readonly auth: unknown;
+      readonly tunnel: unknown;
+      readonly codex: Record<string, unknown>;
+      readonly workspaces: readonly Record<string, unknown>[];
+    };
+    assert.equal(saved.host, "127.0.0.1");
+    assert.deepEqual(saved.auth, { token: "keep-this-token" });
+    assert.deepEqual(saved.tunnel, { profile: "keep-this-profile" });
+    assert.deepEqual(saved.codex, {
+      clientPath: "tools/codex.exe",
+      customOption: "keep-this-option",
+      defaultModel: "gpt-6-luna",
+      defaultEffort: "high",
+    });
+    assert.equal(saved.workspaces[0].custom, "keep-this-workspace-field");
+    assert.equal(saved.workspaces[0].root, "project", "saving only Codex defaults must preserve the project's relative path");
+    const reloaded = await readWorkspaceConfig(configPath);
+    assert.deepEqual(reloaded.codexDefaults, { defaultModel: "gpt-6-luna", defaultEffort: "high" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace config rejects invalid Codex defaults and stale snapshots without writing", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bridge-workspace-codex-conflict-"));
+  try {
+    const workspaceRoot = path.join(root, "project");
+    await mkdir(workspaceRoot);
+    const configPath = path.join(root, "mcp-bridge.json");
+    await writeFile(configPath, JSON.stringify({
+      codex: { defaultModel: "gpt-6-luna", defaultEffort: "max" },
+      workspaces: [{ id: "demo", root: workspaceRoot }],
+    }), "utf8");
+    const snapshot = await readWorkspaceConfig(configPath);
+    const original = await readFile(configPath, "utf8");
+
+    await assert.rejects(writeWorkspaceConfig(configPath, snapshot.workspaces, {
+      expectedKey: snapshot.key,
+      codexDefaults: { defaultModel: "bad model", defaultEffort: "max" },
+    }), /模型 ID 无效/u);
+    assert.equal(await readFile(configPath, "utf8"), original);
+
+    const concurrentContent = JSON.stringify({
+      codex: { defaultModel: "external-model", defaultEffort: "low" },
+      externalSetting: "keep-this-update",
+      workspaces: [{ id: "demo", root: workspaceRoot }],
+    }, null, 2);
+    await writeFile(configPath, concurrentContent, "utf8");
+    await assert.rejects(writeWorkspaceConfig(configPath, snapshot.workspaces, {
+      expectedKey: snapshot.key,
+      codexDefaults: { defaultModel: "gpt-6-luna", defaultEffort: "max" },
+    }), /配置已被其他操作修改/u);
+    assert.equal(await readFile(configPath, "utf8"), concurrentContent);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+
 });

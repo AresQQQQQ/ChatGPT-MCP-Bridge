@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import path from "node:path";
 
 import {
   BRIDGE_CAPABILITIES,
@@ -22,6 +23,10 @@ import { extractPdfText, getImage, getPdfInfo, MediaToolError, renderPdfPage } f
 import { callLocalMcpTool, listLocalMcpTools, LocalMcpProxyError } from "./local-mcp-proxy.js";
 import { LocalMcpRegistry, LocalMcpRegistryError } from "./local-mcp-registry.js";
 import { PathSecurityError } from "../security/path-sandbox.js";
+import { registerTerminalTools } from "../terminal/mcp-terminal-tools.js";
+import { registerSavedSshTools } from "../terminal/mcp-ssh-tools.js";
+import { SavedSshHostManager } from "../terminal/saved-ssh-hosts.js";
+import { TerminalSessionManager } from "../terminal/terminal-sessions.js";
 import {
   PatchApplicationError,
   MAX_DIRECTORY_ENTRIES,
@@ -263,6 +268,8 @@ export function createMcpServer(
   codex?: CodexTaskManager,
   worktreeCheckpoints: WorktreeCheckpointStore = new WorktreeCheckpointStore(),
   localMcpRegistry: LocalMcpRegistry = new LocalMcpRegistry(config),
+  terminalSessions: TerminalSessionManager = new TerminalSessionManager(),
+  sshHosts: SavedSshHostManager = new SavedSshHostManager(path.join(path.dirname(config.configPath), ".mcp-bridge-state", "ssh-hosts.json")),
 ): McpServer {
   const server = new McpServer(
     { name: "chatgpt-mcp-bridge", version: "0.1.0" },
@@ -273,6 +280,8 @@ export function createMcpServer(
   const desktopApps = new DesktopAppLauncher();
   const recipes = new RecipeRunner();
   const processes = new ProcessInspector();
+  registerTerminalTools(server, registry, terminalSessions);
+  registerSavedSshTools(server, registry, terminalSessions, sshHosts);
   const requireCodex = (): CodexTaskManager => {
     if (!codex) throw new CodexBridgeError("Codex integration is not enabled for this Bridge");
     return codex;
@@ -1497,8 +1506,8 @@ export function createMcpServer(
         codexStateVersion: z.literal(BRIDGE_CAPABILITIES.codexStateVersion),
         codexModuleModel: z.literal(BRIDGE_CAPABILITIES.codexModuleModel),
         codexExecutionTransport: z.literal(BRIDGE_CAPABILITIES.codexExecutionTransport),
-        codexDefaultModel: z.literal(BRIDGE_CAPABILITIES.codexDefaultModel),
-        codexDefaultReasoningEffort: z.literal(BRIDGE_CAPABILITIES.codexDefaultReasoningEffort),
+        codexDefaultModel: z.string(),
+        codexDefaultReasoningEffort: codexReasoningEffortSchema,
       }),
       desktop: z.object({
         available: z.boolean(),
@@ -1621,14 +1630,14 @@ export function createMcpServer(
 
   server.registerTool("codex_submit_task", {
     title: "Submit Codex task",
-    description: "Submit a ChatGPT-authored Codex task. Every real task defaults to model gpt-5.6-luna with reasoning effort max. Only pass model or effort when the user explicitly requests a different value; do not autonomously choose another model. A module configured under workspace.codex.modules is a long-term module; any other valid moduleId is created dynamically as a temporary module. Bridge-managed new thread/module display names always contain exactly one [ChatGPT] prefix, even if a legacy configured display name already contains one. Each module has at most one current thread binding. If unbound, omit threadId to create and bind a new conversation or pass one existing threadId to bind it. For Codex runtimes that return an unmaterialized new thread, the Bridge performs one internal no-op bootstrap turn, waits for completion, hands the thread to Codex Desktop, then sends the caller's instruction as the first real Desktop turn. ChatGPT does not need to schedule a separate bootstrap task. If already bound, ChatGPT must explicitly pass that same threadId. Configured modules survive unbind/archive as unbound; temporary modules are removed when their binding is cleared. Archived threads are never automatically unarchived. One workspace writer runs at a time.",
+    description: "Submit a ChatGPT-authored Codex task. New tasks use the default model and reasoning effort configured in the Bridge Codex settings. Only pass model or effort when the user explicitly requests a different value; do not autonomously choose another model. A module configured under workspace.codex.modules is a long-term module; any other valid moduleId is created dynamically as a temporary module. Bridge-managed new thread/module display names always contain exactly one [ChatGPT] prefix, even if a legacy configured display name already contains one. Each module has at most one current thread binding. If unbound, omit threadId to create and bind a new conversation or pass one existing threadId to bind it. For Codex runtimes that return an unmaterialized new thread, the Bridge performs one internal no-op bootstrap turn, waits for completion, hands the thread to Codex Desktop, then sends the caller's instruction as the first real Desktop turn. ChatGPT does not need to schedule a separate bootstrap task. If already bound, ChatGPT must explicitly pass that same threadId. Configured modules survive unbind/archive as unbound; temporary modules are removed when their binding is cleared. Archived threads are never automatically unarchived. One workspace writer runs at a time.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       moduleId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u).default("general"),
       threadId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,255}$/u).optional(),
       instruction: z.string().min(1).max(64 * 1024),
-      model: codexModelSchema.optional().describe(`Optional model id override. Omit unless the user explicitly requested a different model. Default: ${CODEX_DEFAULT_MODEL}.`),
-      effort: codexReasoningEffortSchema.optional().describe(`Optional reasoning-effort override. Omit unless the user explicitly requested a different effort. Default: ${CODEX_DEFAULT_REASONING_EFFORT}.`),
+      model: codexModelSchema.optional().describe(`Optional model id override. Omit unless the user explicitly requested a different model. Default: ${config.codex?.defaultModel ?? CODEX_DEFAULT_MODEL}.`),
+      effort: codexReasoningEffortSchema.optional().describe(`Optional reasoning-effort override. Omit unless the user explicitly requested a different effort. Default: ${config.codex?.defaultEffort ?? CODEX_DEFAULT_REASONING_EFFORT}.`),
       requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u).optional(),
     }).strict(),
     outputSchema: codexTaskSchema,
@@ -1651,7 +1660,7 @@ export function createMcpServer(
 
   server.registerTool("codex_continue_task", {
     title: "Continue Codex task",
-    description: "Queue a follow-up instruction on the exact Codex thread used by a previous task. The follow-up inherits that task's model and reasoning effort (normally gpt-5.6-luna + max); only pass model or effort when the user explicitly requests a different value. The thread must still be the module's current unarchived binding; archived or replaced bindings are rejected and never automatically unarchived.",
+    description: "Queue a follow-up instruction on the exact Codex thread used by a previous task. The follow-up inherits that task's model and reasoning effort (as selected for that previous task); only pass model or effort when the user explicitly requests a different value. The thread must still be the module's current unarchived binding; archived or replaced bindings are rejected and never automatically unarchived.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       taskId: z.string().min(1).max(256),

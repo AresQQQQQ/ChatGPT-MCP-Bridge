@@ -185,7 +185,7 @@ test("Codex Desktop IPC uses official v2 start-turn framing and observes real tu
       cwd: "C:/work/project",
       clientUserMessageId: "task-1",
       text: "[ChatGPT]\nrun test",
-      model: "gpt-5.6-luna",
+      model: "gpt-6-luna",
       effort: "max",
       outputSchema: { type: "object" },
     }, owner!);
@@ -202,12 +202,12 @@ test("Codex Desktop IPC uses official v2 start-turn framing and observes real tu
     assert.equal(request.threadId, "thread-1");
     assert.equal(request.clientUserMessageId, "task-1");
     assert.equal(request.cwd, "C:/work/project");
-    assert.equal(request.model, "gpt-5.6-luna");
+    assert.equal(request.model, "gpt-6-luna");
     assert.equal(request.effort, "max");
     const collaborationMode = request.collaborationMode as Record<string, unknown>;
     assert.equal(collaborationMode.mode, "default");
     const collaborationSettings = collaborationMode.settings as Record<string, unknown>;
-    assert.equal(collaborationSettings.model, "gpt-5.6-luna");
+    assert.equal(collaborationSettings.model, "gpt-6-luna");
     assert.equal(collaborationSettings.reasoning_effort, "max");
     assert.equal(collaborationSettings.developer_instructions, null);
     assert.equal(typeof request.outputSchema, "object");

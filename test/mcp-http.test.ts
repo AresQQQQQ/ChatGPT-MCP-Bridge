@@ -26,6 +26,11 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
       port: 0,
       mcpPath: "/mcp",
       maxReadBytes: 1024,
+      codex: {
+        defaultModel: "gpt-6-luna",
+        defaultEffort: "high",
+        stateFile: path.join(tempRoot, ".mcp-bridge-state", "codex.json"),
+      },
       workspaces: [{
         id: "demo",
         root: tempRoot,
@@ -39,6 +44,7 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
       port: config.port,
       mcpPath: config.mcpPath,
       maxReadBytes: config.maxReadBytes,
+      codex: config.codex,
       workspaces: config.workspaces,
     }, null, 2)}\n`, "utf8");
     bridge = await createBridgeApp(config);
@@ -51,7 +57,7 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
     client = new Client({ name: "codex-tool-contract", version: "0.1.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`)));
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 66);
+    assert.equal(tools.tools.length, 76);
     const names = new Set(tools.tools.map((tool) => tool.name));
     for (const name of [
       "codex_get_status",
@@ -72,12 +78,15 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
     assert.match(modulesTool.description ?? "", /single current Codex thread binding/u);
     const submit = tools.tools.find((tool) => tool.name === "codex_submit_task");
     assert.ok(submit);
-    assert.match(submit.description ?? "", /gpt-5\.6-luna.*reasoning effort max/u);
+    const submitProperties = (submit.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
+    const modelProperty = submitProperties.model as { readonly description?: string };
+    const effortProperty = submitProperties.effort as { readonly description?: string };
+    assert.match(modelProperty.description ?? "", /Default: gpt-6-luna/u);
+    assert.match(effortProperty.description ?? "", /Default: high/u);
     assert.match(submit.description ?? "", /at most one current thread binding/u);
     const continueTool = tools.tools.find((tool) => tool.name === "codex_continue_task");
     assert.ok(continueTool);
     assert.match(continueTool.description ?? "", /module's current unarchived binding/u);
-    const submitProperties = (submit.inputSchema as { properties?: Record<string, unknown> }).properties ?? {};
     assert.equal("workspaceId" in submitProperties, true);
     assert.equal("moduleId" in submitProperties, true);
     assert.equal("instruction" in submitProperties, true);
@@ -87,6 +96,12 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
     assert.equal("cwd" in submitProperties, false);
     assert.equal("sandbox" in submitProperties, false);
     assert.equal("approvalPolicy" in submitProperties, false);
+
+    const status = await client.callTool({ name: "codex_get_status", arguments: {} });
+    assert.equal(status.isError, undefined);
+    const statusText = status.content[0]?.type === "text" ? status.content[0].text : "";
+    assert.match(statusText, /"codexDefaultModel":"gpt-6-luna"/u);
+    assert.match(statusText, /"codexDefaultReasoningEffort":"high"/u);
 
     const modules = await client.callTool({ name: "codex_list_modules", arguments: { workspaceId: "demo" } });
     assert.equal(modules.isError, undefined);
@@ -206,8 +221,18 @@ test("Express endpoint completes MCP handshake and exposes the file tools", asyn
         "render_pdf_page",
         "search",
         "snapshot_tree",
+        "ssh_host_list",
+        "ssh_host_remove",
+        "ssh_host_save",
+        "ssh_start_saved",
         "stat_file",
         "stat_files",
+        "terminal_close",
+        "terminal_list",
+        "terminal_local_password",
+        "terminal_read",
+        "terminal_start",
+        "terminal_write",
         "wait_process",
         "write_file",
         "write_file_abort",

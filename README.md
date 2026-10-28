@@ -86,17 +86,17 @@ node dist/cli.js doctor
 
 ### macOS Apple Silicon
 
-Mac 版源码位于 `feat/macos-arm64` 分支。在 macOS Terminal 中执行：
+Mac 版源码位于 `main` 分支。在 macOS Terminal 中执行：
 
 ```sh
-git clone --branch feat/macos-arm64 https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
+git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
 cd ChatGPT-MCP-Bridge
 pnpm install --frozen-lockfile
 pnpm build
 pnpm run setup
 ```
 
-已有 clone 可先运行 `git fetch origin`，再运行 `git switch feat/macos-arm64`。pnpm 应安装到普通终端可发现的位置，不能仅依赖 Codex 附带的 pnpm；详见 [macOS 环境说明](docs/SETUP.md#macos-apple-silicon)。已有 Tunnel 时输入现有 ID 和 Runtime API key，继续使用原 Tunnel。向导使用相同配置格式和 `bridge` profile；不需要复制 Windows YAML 或 Windows 路径。
+已有 clone 可先运行 `git fetch origin`，再运行 `git switch main`。pnpm 应安装到普通终端可发现的位置，不能仅依赖 Codex 附带的 pnpm；详见 [macOS 环境说明](docs/SETUP.md#macos-apple-silicon)。已有 Tunnel 时输入现有 ID 和 Runtime API key，继续使用原 Tunnel。向导使用相同配置格式和 `bridge` profile；不需要复制 Windows YAML 或 Windows 路径。
 
 将本机 `mcp-bridge.json` 的工作区改为实际 Mac 项目绝对路径；例如 Bridge 自身可用 `id: bridge-mac`、`mode: trusted-dev`，`allowedScripts: ["test", "build", "typecheck"]`（本项目没有 lint script）。
 
@@ -130,6 +130,17 @@ pnpm run ui
 
 应用使用本机回环控制接口，鉴权与 Tunnel profile 留在后端，日志中的实际密钥和 Tunnel ID 会隐藏。应用依赖当前项目目录和 Node 环境；移动目录后重新构建应用。详见 [Mac UI 使用与维护](docs/SETUP.md#mac-图形控制台)。
 
+## 统一版本更新
+
+Windows 与 macOS 都从 GitHub main 更新。先停止本机 Bridge/Tunnel；更新脚本不会根据端口或进程名强制结束未知进程。
+
+- Windows：运行 update-bridge.cmd。
+- macOS：运行 ./update-bridge.command。
+
+脚本仅接受 main 分支和干净的源码工作树，执行 git fetch、检查本地/远端提交关系，并只允许 fast-forward 到 origin/main。依赖清单变更时执行 pnpm install --frozen-lockfile，随后构建并运行 doctor。诊断通过后，只启动当前电脑本机配置中的 Bridge 与 Tunnel。私有配置、密钥、状态目录和 Tunnel profile 不参与源码同步。更新失败时保留错误输出，不会强制重置本地分支。
+
+GitHub Actions 在 Windows 与 Apple Silicon macOS runner 上分别运行安装、typecheck、完整测试和构建；macOS job 还会编译原生 AppKit/WebKit 控制台。
+Windows Credential Manager 与保存密码的交互式 SSH 登录仍为 Windows 专属能力；macOS 尚未实现 Keychain 适配，相关 SSH 凭据操作会明确报告不支持，不会把该功能描述为跨平台可用。
 ## 连接 ChatGPT
 
 1. 在 ChatGPT 网页端打开 **设置 → 安全与登录 → 开发者模式**。
@@ -203,6 +214,7 @@ pnpm export:source
 
 - [手动配置与维护](docs/SETUP.md)：本机文件、重新配置、Codex Desktop、外部 MCP 和源码导出。
 - [技术参考](docs/REFERENCE.md)：工具、执行权限、HTTP 认证和 Codex 任务模型。
+- [交互式终端与 SSH](docs/INTERACTIVE-TERMINAL.md)：Windows PTY、终端会话、SSH 本地密码输入和安全限制。
 
 ## 许可证
 

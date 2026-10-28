@@ -38,7 +38,7 @@ function assertPlainText(value: string, label: string, maxChars: number): void {
   }
 }
 
-function trustedDeveloperEnvironment(): NodeJS.ProcessEnv {
+export function trustedDeveloperEnvironment(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;

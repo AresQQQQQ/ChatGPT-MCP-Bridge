@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -67,6 +67,8 @@ test("config loader resolves Codex runtime/state paths and workspace module bind
 
   const config = await loadConfig(configPath);
   assert.deepEqual(config.codex, {
+    defaultModel: "gpt-6-luna",
+    defaultEffort: "max",
     clientPath: path.join(tempRoot, "bin", "codex.exe"),
     stateFile: path.join(tempRoot, ".mcp-bridge-state", "codex.json"),
   });
@@ -74,6 +76,34 @@ test("config loader resolves Codex runtime/state paths and workspace module bind
     enabled: true,
     modules: { media: "Media / PDF" },
   });
+});
+
+test("config loader applies Codex model and reasoning defaults and rejects invalid values", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "mcp-bridge-codex-defaults-"));
+  try {
+    const configPath = path.join(tempRoot, "bridge.json");
+    await writeFile(configPath, JSON.stringify({
+      codex: { defaultModel: "gpt-6-reasoner", defaultEffort: "high" },
+      workspaces: [{ id: "demo", root: "." }],
+    }), "utf8");
+    const config = await loadConfig(configPath);
+    assert.equal(config.codex?.defaultModel, "gpt-6-reasoner");
+    assert.equal(config.codex?.defaultEffort, "high");
+
+    await writeFile(configPath, JSON.stringify({
+      codex: { defaultModel: "invalid model", defaultEffort: "high" },
+      workspaces: [{ id: "demo", root: "." }],
+    }), "utf8");
+    await assert.rejects(loadConfig(configPath), /codex\.defaultModel invalid Codex model id/u);
+
+    await writeFile(configPath, JSON.stringify({
+      codex: { defaultModel: "gpt-6-luna", defaultEffort: "extreme" },
+      workspaces: [{ id: "demo", root: "." }],
+    }), "utf8");
+    await assert.rejects(loadConfig(configPath), /codex\.defaultEffort/u);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("config loader accepts workspace-local loopback MCP servers", async () => {

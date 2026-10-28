@@ -11,6 +11,8 @@ import { buildHttpSecurityPolicy, createMcpSecurityMiddleware } from "./auth.js"
 import { createMcpServer } from "../mcp/server.js";
 import { LocalMcpRegistry } from "../mcp/local-mcp-registry.js";
 import { WorkspaceRegistry } from "../workspaces/workspace-registry.js";
+import { TerminalSessionManager } from "../terminal/terminal-sessions.js";
+import { SavedSshHostManager } from "../terminal/saved-ssh-hosts.js";
 
 export interface BridgeApp {
   readonly app: Express;
@@ -84,6 +86,8 @@ export async function createBridgeApp(config: BridgeConfig, options: BridgeAppOp
   await localMcpRegistry.initialize();
   const localMcpStateWarning = localMcpRegistry.consumeStateWarning();
   if (localMcpStateWarning) options.logSink?.("stderr", localMcpStateWarning);
+  const terminalSessions = new TerminalSessionManager();
+  const sshHosts = new SavedSshHostManager(path.join(path.dirname(config.configPath), ".mcp-bridge-state", "ssh-hosts.json"));
   const activeServers = new Set<ReturnType<typeof createMcpServer>>();
   const mcpPath = config.mcpPath;
 
@@ -118,7 +122,7 @@ export async function createBridgeApp(config: BridgeConfig, options: BridgeAppOp
         const statelessTransport = new StreamableHTTPServerTransport({
           enableJsonResponse: true,
         });
-        const server = createMcpServer(config, registry, codex, worktreeCheckpoints, localMcpRegistry);
+        const server = createMcpServer(config, registry, codex, worktreeCheckpoints, localMcpRegistry, terminalSessions, sshHosts);
         activeServers.add(server);
         try {
           await server.connect(statelessTransport as unknown as Parameters<typeof server.connect>[0]);
@@ -164,6 +168,7 @@ export async function createBridgeApp(config: BridgeConfig, options: BridgeAppOp
     close: async () => {
       await Promise.all([...activeServers].map((server) => server.close()));
       activeServers.clear();
+      terminalSessions.close();
       await codex?.close();
     },
   };

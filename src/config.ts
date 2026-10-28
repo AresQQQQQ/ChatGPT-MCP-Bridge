@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
 import { z } from "zod";
+import { CODEX_DEFAULT_MODEL, CODEX_DEFAULT_REASONING_EFFORT } from "./capabilities.js";
 
 const safeLocalIdSchema = z.string().regex(
   /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/,
@@ -72,8 +73,14 @@ const tunnelConfigSchema = z.object({
   healthUrl: z.string().url().refine(isLoopbackUrl, "must use a loopback http URL").optional(),
 });
 
+const codexEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]);
+export type CodexDefaultEffort = z.infer<typeof codexEffortSchema>;
+export const CODEX_MODEL_ID_PATTERN = /^[^\s\u0000-\u001f\u007f]{1,256}$/u;
+
 const codexConfigSchema = z.object({
   clientPath: z.string().min(1).optional(),
+  defaultModel: z.string().regex(CODEX_MODEL_ID_PATTERN, "invalid Codex model id").optional(),
+  defaultEffort: codexEffortSchema.optional(),
 });
 
 const fileConfigSchema = z.object({
@@ -132,6 +139,8 @@ export interface AuthConfig {
 }
 
 export interface CodexConfig {
+  readonly defaultModel?: string;
+  readonly defaultEffort?: CodexDefaultEffort;
   readonly clientPath?: string;
   readonly stateFile: string;
 }
@@ -320,6 +329,8 @@ export async function loadConfig(
     ...(parsed.data.codex ? {
       codex: {
         ...(parsed.data.codex.clientPath ? { clientPath: path.resolve(configDirectory, parsed.data.codex.clientPath) } : {}),
+        defaultModel: parsed.data.codex.defaultModel ?? CODEX_DEFAULT_MODEL,
+        defaultEffort: parsed.data.codex.defaultEffort ?? CODEX_DEFAULT_REASONING_EFFORT,
         stateFile: path.resolve(configDirectory, ".mcp-bridge-state", "codex.json"),
       },
     } : {}),
