@@ -27,3 +27,17 @@ test("Windows console does not start Bridge with unsaved workspace permissions",
     "unsaved permission badge must explain that it is not active yet",
   );
 });
+
+test("Windows project tree labels permission mode and keeps the Module count visible", async () => {
+  const source = await readFile(path.resolve("src/ui/windows-console.ts"), "utf8");
+  assert.match(source, /kindText=\$projectModeLabel;badgeVisibility='Visible'/u);
+  assert.match(source, /badgeBrush=\$projectBadgeBrush;badgeForeground=\$projectBadgeForeground/u);
+  assert.match(source, /\$moduleCountText = "\$\(\$workspaceBindings\.Count\) Modules"/u);
+});
+
+test("Windows log panel supports auto-follow and restores the previous scroll position when disabled", async () => {
+  const source = await readFile(path.resolve("src/ui/windows-console.ts"), "utf8");
+  assert.match(source, /x:Name="LogAutoFollow"/u);
+  assert.match(source, /\$followLogs = .*IsChecked -eq \$true/u);
+  assert.match(source, /ScrollToVerticalOffset/u);
+});

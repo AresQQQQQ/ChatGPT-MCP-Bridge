@@ -661,7 +661,9 @@ public static class ModernFolderPicker
       </Border>
     </Grid>
 
-    <Expander x:Name="LogExpander" Grid.Row="3" Header="运行日志" IsExpanded="True" Foreground="#344054" FontWeight="SemiBold">
+    <Expander x:Name="LogExpander" Grid.Row="3" IsExpanded="True" Foreground="#344054" FontWeight="SemiBold">
+
+      <Expander.Header><DockPanel LastChildFill="False"><TextBlock Text="运行日志" VerticalAlignment="Center"/><CheckBox x:Name="LogAutoFollow" Content="自动滚动" IsChecked="True" Margin="16,0,0,0" FontSize="11" Foreground="#667085" VerticalAlignment="Center"/></DockPanel></Expander.Header>
       <Border Style="{StaticResource PanelBorderStyle}" Margin="0,6,0,0" Padding="0" Height="152">
         <ListView x:Name="LogList" BorderThickness="0" Background="White" FontWeight="Normal" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
           <ListView.ItemContainerStyle>
@@ -701,7 +703,7 @@ $bridgeValue = $window.FindName('BridgeValue'); $mcpValue = $window.FindName('Mc
 $bridgeDot = $window.FindName('BridgeDot'); $mcpDot = $window.FindName('McpDot'); $tunnelDot = $window.FindName('TunnelDot'); $codexDot = $window.FindName('CodexDot')
 $bridgeMeta = $window.FindName('BridgeMeta'); $mcpMeta = $window.FindName('McpMeta'); $tunnelMeta = $window.FindName('TunnelMeta'); $codexMeta = $window.FindName('CodexMeta')
 $overallStatusBadge = $window.FindName('OverallStatusBadge'); $overallStatusDot = $window.FindName('OverallStatusDot'); $overallStatusText = $window.FindName('OverallStatusText')
-$stateValue = $window.FindName('StateValue'); $pidValue = $window.FindName('PidValue'); $portValue = $window.FindName('PortValue'); $startedValue = $window.FindName('StartedValue'); $errorValue = $window.FindName('ErrorValue'); $logList = $window.FindName('LogList')
+$stateValue = $window.FindName('StateValue'); $pidValue = $window.FindName('PidValue'); $portValue = $window.FindName('PortValue'); $startedValue = $window.FindName('StartedValue'); $errorValue = $window.FindName('ErrorValue'); $logList = $window.FindName('LogList'); $logAutoFollow = $window.FindName('LogAutoFollow')
 $projectTree = $window.FindName('ProjectTree'); $treeRowTemplate = $projectTree.Resources['TreeRowTemplate']; $addWorkspaceButton = $window.FindName('AddWorkspaceButton'); $deleteWorkspaceButton = $window.FindName('DeleteWorkspaceButton'); $browseWorkspaceButton = $window.FindName('BrowseWorkspaceButton'); $saveConfigButton = $window.FindName('SaveConfigButton'); $configStatus = $window.FindName('ConfigStatus'); $selectionStatus = $window.FindName('SelectionStatus'); $projectActions = $window.FindName('ProjectActions'); $moduleActions = $window.FindName('ModuleActions'); $projectReadOnlyPanel = $window.FindName('ProjectReadOnlyPanel'); $projectEditPanel = $window.FindName('ProjectEditPanel'); $projectButtonBar = $window.FindName('ProjectButtonBar'); $projectModeBadge = $window.FindName('ProjectModeBadge'); $projectModeText = $window.FindName('ProjectModeText'); $projectIdValue = $window.FindName('ProjectIdValue'); $projectPathValue = $window.FindName('ProjectPathValue'); $projectModeValue = $window.FindName('ProjectModeValue'); $projectModuleCountValue = $window.FindName('ProjectModuleCountValue'); $projectIdBox = $window.FindName('ProjectIdBox'); $projectPathBox = $window.FindName('ProjectPathBox'); $projectModeBox = $window.FindName('ProjectModeBox'); $moduleSelectionTitle = $window.FindName('ModuleSelectionTitle')
 $moduleTypeBadge = $window.FindName('ModuleTypeBadge'); $moduleIdValue = $window.FindName('ModuleIdValue'); $moduleBindingValue = $window.FindName('ModuleBindingValue'); $threadNameValue = $window.FindName('ThreadNameValue'); $threadIdValue = $window.FindName('ThreadIdValue'); $ownerValue = $window.FindName('OwnerValue')
 $refreshCodexButton = $window.FindName('RefreshCodexButton'); $unbindCodexButton = $window.FindName('UnbindCodexButton'); $codexBindingStatus = $window.FindName('CodexBindingStatus')
@@ -899,7 +901,13 @@ function Update-LocalMcpServers($message) {
 }
 
 function Update-Logs($message) {
-  $key = [string]$message.logKey; if ($key -eq $script:lastLogKey) { return }; $script:lastLogKey = $key; $logList.Items.Clear()
+  $key = [string]$message.logKey; if ($key -eq $script:lastLogKey) { return }; $script:lastLogKey = $key
+  $logList.ApplyTemplate()
+  $scrollViewer = $null
+  try { $scrollViewer = $logList.Template.FindName('PART_ScrollViewer', $logList) } catch {}
+  $previousOffset = if($null -ne $scrollViewer){[double]$scrollViewer.VerticalOffset}else{0.0}
+  $followLogs = $null -eq $logAutoFollow -or $logAutoFollow.IsChecked -eq $true
+  $logList.Items.Clear()
   foreach ($entry in $message.logs) {
     $time='--:--:--'; try {$time=([DateTimeOffset]::Parse([string]$entry.timestamp).LocalDateTime.ToString('HH:mm:ss'))} catch {}
     $source=switch([string]$entry.source){'bridge'{'Bridge'}'tunnel'{'Tunnel'}default{'Controller'}}
@@ -915,7 +923,12 @@ function Update-Logs($message) {
     $row=[pscustomobject]@{time=$time;level=$level;source=$source;message=$messageText;isError=$isError;isWarning=$isWarning}
     [void]$logList.Items.Add($row)
   }
-  if($logList.Items.Count -gt 0){$logList.ScrollIntoView($logList.Items[$logList.Items.Count-1])}
+  $logList.UpdateLayout()
+  try { $scrollViewer = $logList.Template.FindName('PART_ScrollViewer', $logList) } catch {}
+  if($logList.Items.Count -gt 0){
+    if($followLogs){$logList.ScrollIntoView($logList.Items[$logList.Items.Count-1])}
+    elseif($null -ne $scrollViewer){$scrollViewer.ScrollToVerticalOffset([Math]::Min($previousOffset,[double]$scrollViewer.ScrollableHeight))}
+  }
 }
 
 function Get-CurrentBindings {
@@ -947,7 +960,11 @@ function Build-ProjectTree($bindings) {
     $workspaceId=[string]$row.id; $workspaceBindings=@($bindings|Where-Object{[string]$_.workspaceId -eq $workspaceId})
     $mode=[string]$row.mode
     $projectTitleBrush=if($mode -eq 'trusted-dev'){$amber}elseif($mode -eq 'readonly'){$muted}elseif($mode -eq 'handoff'){$handoffBrush}else{$moduleIconBrush}
-    $projectData=[pscustomobject]@{nodeType='project';workspaceId=$workspaceId;kindText='';badgeVisibility='Collapsed';title=$workspaceId;titleWeight='SemiBold';titleBrush=$projectTitleBrush;iconData=$projectIconGeometry;iconBrush=$moduleIconBrush;badgeBrush=$softBlue;badgeForeground=$accent;stateText=if($workspaceBindings.Count -gt 0){$workspaceBindings.Count.ToString()+' Modules'}else{''};stateBrush=$muted;detail=[string]$row.root;detailFull=[string]$row.root;bindingText='';ownerText='';row=$row}
+    $projectModeLabel = switch ($mode) { 'readonly' { (ConvertFrom-Json '"\u53ea\u8bfb"') } 'trusted-dev' { (ConvertFrom-Json '"\u53ef\u4fe1\u5f00\u53d1"') } 'handoff' { (ConvertFrom-Json '"\u4ea4\u63a5"') } default { (ConvertFrom-Json '"\u5de5\u4f5c\u533a"') } }
+    $projectBadgeBrush = if($mode -eq 'trusted-dev'){$softAmber}elseif($mode -eq 'workspace'){$softBlue}else{$softGray}
+    $projectBadgeForeground = if($mode -eq 'trusted-dev'){$amber}elseif($mode -eq 'handoff'){$handoffBrush}elseif($mode -eq 'workspace'){$accent}else{$textSecondary}
+    $moduleCountText = "$($workspaceBindings.Count) Modules"
+    $projectData=[pscustomobject]@{nodeType='project';workspaceId=$workspaceId;kindText=$projectModeLabel;badgeVisibility='Visible';title=$workspaceId;titleWeight='SemiBold';titleBrush=$projectTitleBrush;iconData=$projectIconGeometry;iconBrush=$moduleIconBrush;badgeBrush=$projectBadgeBrush;badgeForeground=$projectBadgeForeground;stateText=$moduleCountText;stateBrush=$muted;detail=[string]$row.root;detailFull=[string]$row.root;bindingText='';ownerText='';row=$row}
     $projectItem=New-Object Windows.Controls.TreeViewItem; $projectItem.Header=$projectData; $projectItem.HeaderTemplate=$treeRowTemplate; $projectItem.Tag=$projectData; $projectItem.HorizontalContentAlignment='Stretch'
     if($expanded.ContainsKey($workspaceId)){$projectItem.IsExpanded=[bool]$expanded[$workspaceId]}
     foreach($binding in $workspaceBindings){

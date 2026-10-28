@@ -4,3 +4,20 @@
 @media(max-width:980px){.workspace-layout{grid-template-columns:220px minmax(0,1fr)}.chain-node{gap:6px;padding:10px 8px}.chain-node img{width:23px;height:23px}.chain-node h3{font-size:10px}.chain-arrow{display:none}.chain{gap:7px}.chain-node p{font-size:9px}main{padding-inline:18px}.topbar{padding-inline:19px}.inspector-heading,.inspector-body{padding-inline:17px}.tabs{padding-inline:17px}}
 @media(max-width:700px){.topbar{padding:25px 15px 15px;align-items:flex-start}.brand img{width:30px;height:30px}.brand h1{font-size:15px}.brand p{display:none}.toolbar{gap:5px}.toolbar button{padding:6px 9px;font-size:11px}.workspace-layout{grid-template-columns:1fr}.sidebar #tree{max-height:150px}.chain{flex-wrap:wrap}.chain-node{flex:1 1 30%}.connection{padding:13px}.service-meta #runtime-meta{display:none}.logs .log-tools{gap:3px}.log-tools label{display:none}.segmented button{padding-inline:7px}.log-filters{gap:8px}.log-filters>input{width:135px}footer{font-size:9px;padding-inline:18px}footer span:last-child{display:none}.metadata{grid-template-columns:85px minmax(0,1fr)}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+
+/* Keep workspace permission labels scannable without changing the sidebar layout. */
+.tree-row .small.mode-readonly{background:#f2f4f7;color:#667085}
+.tree-row .small.mode-workspace{background:#eef4ff;color:#175cd3}
+.tree-row .small.mode-trusted-dev{background:#fff5e8;color:#b54708}
+.tree-row .small.mode-handoff{background:#f4ebff;color:#6941c6}
+.tree-row .small.module-count{min-width:18px;text-align:center;padding-inline:3px;background:transparent;color:var(--muted)}
+.log-row.level-error .log-message{color:var(--bad);font-weight:600}
+.log-row.level-warn .log-message{color:#b54708}
+.log-row.level-debug .log-message{color:var(--muted)}
+@media(prefers-color-scheme:dark){
+  .tree-row .small.mode-readonly{background:#363941;color:#b4bbc7}
+  .tree-row .small.mode-workspace{background:#293b55;color:#9bc5ff}
+  .tree-row .small.mode-trusted-dev{background:#44372a;color:#e6b17c}
+  .tree-row .small.mode-handoff{background:#3d304e;color:#c6a5f2}
+  .log-row.level-warn .log-message{color:#d0b778}
+}

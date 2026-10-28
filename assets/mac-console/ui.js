@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 const modes = { readonly:"只读", workspace:"普通工作区", "trusted-dev":"可信开发", handoff:"交接模式" };
+const modeClasses = { readonly:"mode-readonly", workspace:"mode-workspace", "trusted-dev":"mode-trusted-dev", handoff:"mode-handoff" };
 const lifecycleLabels = { stopped:"已停止", starting:"正在启动", running:"运行中", stopping:"正在停止", error:"服务异常" };
 const tokenKey = "bridge-ui-session";
 let credential = location.hash.slice(1) || sessionStorage.getItem(tokenKey) || "";
@@ -61,7 +62,7 @@ function renderTree() {
     const modules = (snapshot.codexBindings || []).filter(m => m.workspaceId === w.id);
     const matches = w.id.toLowerCase().includes(filter) || modules.some(m => m.displayName.toLowerCase().includes(filter));
     if (!matches) return "";
-    return `<div class="tree-group"><button class="tree-row ${selected === w.id && !selectedModule ? "selected" : ""}" data-workspace="${escape(w.id)}" aria-label="项目 ${escape(w.id)}" aria-current="${selected === w.id && !selectedModule ? "true" : "false"}"><span class="tree-glyph" aria-hidden="true">▱</span><span class="label">${escape(w.id)}</span><span class="small">${escape(modes[w.mode])}</span></button>${modules.map(m => `<button class="tree-row module-row ${selected === w.id && selectedModule === m.moduleId ? "selected" : ""}" data-workspace="${escape(w.id)}" data-module="${escape(m.moduleId)}"><span class="tree-glyph" aria-hidden="true">${m.moduleKind === "configured" ? "◇" : "◌"}</span><span class="label">${escape(m.displayName)}</span><i class="dot ${m.bindingStatus === "bound" ? "good" : ""}"></i></button>`).join("")}</div>`;
+    return `<div class="tree-group"><button class="tree-row ${selected === w.id && !selectedModule ? "selected" : ""}" data-workspace="${escape(w.id)}" aria-label="项目 ${escape(w.id)}" aria-current="${selected === w.id && !selectedModule ? "true" : "false"}"><span class="tree-glyph" aria-hidden="true">▱</span><span class="label">${escape(w.id)}</span><span class="small ${modeClasses[w.mode] || "mode-workspace"}">${escape(modes[w.mode])}</span><span class="small module-count" title="${modules.length} Codex Modules">${modules.length}</span></button>${modules.map(m => `<button class="tree-row module-row ${selected === w.id && selectedModule === m.moduleId ? "selected" : ""}" data-workspace="${escape(w.id)}" data-module="${escape(m.moduleId)}"><span class="tree-glyph" aria-hidden="true">${m.moduleKind === "configured" ? "◇" : "◌"}</span><span class="label">${escape(m.displayName)}</span><i class="dot ${m.bindingStatus === "bound" ? "good" : ""}"></i></button>`).join("")}</div>`;
   }).join("");
   if (rows === treeSignature) return; treeSignature = rows;
   $("tree").innerHTML = rows || '<div class="tree-empty">没有匹配的项目</div>';
@@ -153,13 +154,27 @@ function updateButtons() {
   if($("remove-workspace"))$("remove-workspace").disabled=busy||s!=="stopped"||draft?.length<2;
   $("footer-status").textContent=expired?"会话已过期，请重新打开应用":draft&&snapshot?.revision!==editRevision?"配置已在外部变化；取消编辑后重新载入":draft?"项目配置有未保存的修改":busy?"正在执行操作…":s==="running"?"服务运行中 · 状态实时更新":"本机控制台已就绪";
 }
+function logTone(log) {
+  const message = String(log.message || "");
+  let level = "";
+  let match = message.match(/"level"\s*:\s*"(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)"/i);
+  if (match) level = match[1].toUpperCase();
+  else {
+    match = message.match(/(?:^|[\[\s])(WARN|WARNING|ERROR|FATAL|DEBUG|INFO)(?:\]|:|\s)/i);
+    if (match) level = match[1].toUpperCase();
+  }
+  if (["ERROR", "FATAL"].includes(level) || (!level && log.stream === "stderr")) return "error";
+  if (["WARN", "WARNING"].includes(level)) return "warn";
+  if (["DEBUG", "TRACE"].includes(level)) return "debug";
+  return "info";
+}
 function renderLogs() {
   const filter=$("log-search").value.toLowerCase();
   visibleLogs=snapshot.logs.filter(log=>log.timestamp>clearedThrough&&(sourceFilter==="all"||log.source===sourceFilter)&&log.message.toLowerCase().includes(filter));
   const signature=JSON.stringify(visibleLogs);if(signature===logSignature)return;logSignature=signature;
   $("log-count").textContent=`${visibleLogs.length} 条`;$("log-empty").hidden=visibleLogs.length>0;
   $("log-lines").replaceChildren(...visibleLogs.map(log=>{
-    const row=document.createElement("div");row.className=`log-row ${log.stream}`;
+    const row=document.createElement("div");row.className=`log-row ${log.stream} level-${logTone(log)}`;
     const time=document.createElement("span");time.className="log-time";time.textContent=new Date(log.timestamp).toLocaleTimeString("zh-CN",{hour12:false});
     const source=document.createElement("span");source.className="log-source";source.textContent=log.source;
     const message=document.createElement("span");message.className="log-message";message.textContent=log.message;
