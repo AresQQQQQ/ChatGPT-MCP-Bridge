@@ -28,6 +28,12 @@ export interface SavedSshHostView extends SavedSshHost {
 
 export interface SaveSshHostRequest extends SavedSshHost {}
 
+/** Local UI only: password is never accepted by an MCP tool or persisted in host metadata. */
+export interface UiSaveSshHostRequest extends SaveSshHostRequest {
+  readonly previousHostId?: string;
+  readonly password?: string;
+}
+
 type PasswordEntry = (label: string) => Promise<string | null>;
 
 const HOST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
@@ -95,7 +101,8 @@ export class SavedSshHostManager {
   ) {}
 
   private async initialize(): Promise<void> {
-    if (this.entries) return;
+    // The UI and running MCP server own separate manager instances; always reload external edits.
+
     try {
       const parsed: unknown = JSON.parse(await readFile(this.stateFile, "utf8"));
       if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as { hosts?: unknown }).hosts)) {
@@ -169,6 +176,71 @@ export class SavedSshHostManager {
     });
   }
 
+  /** Save metadata and an optional replacement credential from the authenticated local desktop UI. */
+  public async saveFromUi(request: UiSaveSshHostRequest): Promise<SavedSshHost> {
+    requireWindowsCredentialManager();
+    verifyIdentity(request);
+    if (request.previousHostId !== undefined && !HOST_ID_PATTERN.test(request.previousHostId)) {
+      throw new SavedSshHostError("Invalid previous SSH device alias");
+    }
+    const password = request.password;
+    if (password !== undefined && (password.length < 1 || password.length > 1200 || /[\r\n\u0000]/u.test(password))) {
+      throw new SavedSshHostError("Invalid SSH password");
+    }
+    return this.locked(async () => {
+      await this.initialize();
+      const previousId = request.previousHostId ?? request.hostId;
+      const old = this.entries!.find(entry => entry.workspaceId === request.workspaceId && entry.hostId === previousId);
+      if (!request.previousHostId && old) throw new SavedSshHostError("SSH host alias already exists; select it to edit");
+      if (request.previousHostId && !old) throw new SavedSshHostError("Original SSH host was not found");
+      const duplicate = this.entries!.find(entry => entry.workspaceId === request.workspaceId && entry.hostId === request.hostId && entry !== old);
+      if (duplicate) throw new SavedSshHostError("SSH host alias already exists in this workspace");
+      const target = credentialTarget(request);
+      const oldTarget = old ? credentialTarget(old) : undefined;
+      // For an edit, an empty password preserves the saved credential; new entries require one.
+      if (!old && password === undefined) throw new SavedSshHostError("A password is required for a new SSH host");
+      let priorSecret: string | undefined;
+      if (old) {
+        const hasOld = await this.vault.exists(oldTarget!);
+        if (hasOld) priorSecret = await this.vault.read(oldTarget!);
+        if (password === undefined && !priorSecret) {
+          throw new SavedSshHostError("The saved credential is missing; enter a new password");
+        }
+      }
+      const changedTarget = oldTarget !== target;
+      if (changedTarget && await this.vault.exists(target)) {
+        throw new SavedSshHostError("A credential already exists for the new SSH host alias");
+      }
+      const nextSecret = password ?? priorSecret!;
+      const needsVaultWrite = !old || changedTarget || password !== undefined || old.username !== request.username;
+      if (needsVaultWrite) await this.vault.save(target, request.username, nextSecret);
+      const next: SavedSshHost = {
+        workspaceId: request.workspaceId, hostId: request.hostId,
+        host: request.host, port: request.port, username: request.username,
+      };
+      const entries = this.entries!.filter(entry => entry !== old);
+      entries.push(next);
+      try {
+        await this.persist(entries);
+      } catch {
+        if (needsVaultWrite) {
+          if (old && !changedTarget && priorSecret) {
+            await this.vault.save(oldTarget!, old.username, priorSecret).catch(() => undefined);
+          } else {
+            await this.vault.delete(target).catch(() => undefined);
+          }
+        }
+        throw new SavedSshHostError("Could not save SSH host metadata");
+      }
+      this.entries = entries;
+      if (changedTarget && oldTarget) {
+        // Remove the old name only after the new metadata and credential are durable.
+        await this.vault.delete(oldTarget).catch(() => undefined);
+      }
+      return next;
+    });
+  }
+
   public async remove(workspaceId: string, hostId: string): Promise<{ removed: boolean }> {
     requireWindowsCredentialManager();
     if (!WORKSPACE_ID_PATTERN.test(workspaceId) || !HOST_ID_PATTERN.test(hostId)) {
@@ -178,9 +250,15 @@ export class SavedSshHostManager {
       await this.initialize();
       const current = this.entries!.find((entry) => entry.workspaceId === workspaceId && entry.hostId === hostId);
       if (!current) return { removed: false };
-      await this.vault.delete(credentialTarget(current));
+      const target = credentialTarget(current);
+      const priorPassword = await this.vault.exists(target) ? await this.vault.read(target) : undefined;
+      await this.vault.delete(target);
       const entries = this.entries!.filter((entry) => entry !== current);
-      await this.persist(entries);
+      try { await this.persist(entries); }
+      catch {
+        if (priorPassword) await this.vault.save(target, current.username, priorPassword).catch(() => undefined);
+        throw new SavedSshHostError("Could not remove SSH host metadata");
+      }
       this.entries = entries;
       return { removed: true };
     });

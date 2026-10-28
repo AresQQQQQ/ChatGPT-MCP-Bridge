@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { BridgeController } from "../control/bridge-controller.js";
 import { readWorkspaceConfig, writeWorkspaceConfig } from "./workspace-config.js";
+import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, connectionSetupInputSchema, type ConnectionSetupProgress } from "./connection-setup.js";
 
 const exec = promisify(execFile);
 const ASSET_ROOT = fileURLToPath(new URL("../../assets/", import.meta.url));
@@ -17,6 +18,7 @@ const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u).max(128);
 const workspace = z.object({ originalId: id.optional(), id, root: z.string().min(1).max(4096), mode: z.enum(["readonly", "workspace", "trusted-dev", "handoff"]) }).strict();
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.enum(["start", "stop", "restart", "close"]) }).strict(),
+  z.object({ action: z.literal("connection-setup"), input: connectionSetupInputSchema }).strict(),
   z.object({ action: z.literal("save-config"), revision: z.string().regex(/^[a-f0-9]{64}$/u), workspaces: z.array(workspace).min(1).max(100) }).strict(),
   z.object({ action: z.literal("refresh-codex"), workspaceId: id }).strict(),
   z.object({ action: z.literal("unbind-codex"), workspaceId: id, moduleId: id }).strict(),
@@ -39,12 +41,14 @@ function matches(actual: string, expected: string): boolean {
 
 export async function launchMacControlUi(configPath: string, options: MacControlUiOptions = {}): Promise<MacControlUi> {
   configPath = path.resolve(configPath);
-  // Validate the existing config before opening an empty/inoperable console.
+  await ensureUiBootstrapConfig(configPath);
+  // Validate the bootstrapped or existing config before opening the console.
   await readWorkspaceConfig(configPath);
   const controller = options.controller ?? new BridgeController({ configPath, captureTunnelOutput: true });
   const credential = randomBytes(32).toString("hex");
   const secrets = new Set<string>([credential]);
   let operation: Promise<void> | undefined;
+  let connectionSetupState: ConnectionSetupProgress = { running: false, success: false, progress: "等待配置", error: "" };
   let closing: Promise<void> | undefined;
   let closed = false;
   let origin = "";
@@ -134,7 +138,7 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     const bindings = status.state === "running"
       ? (await Promise.all(config.workspaces.map(item => controller.getCodexModuleBindings(item.id).catch(() => [])))).flat()
       : [];
-    res.json(sanitize({ status, logs: safeLogs(), workspaces: config.workspaces, revision: revision(config.key), codexStatus, codexBindings: bindings, localMcpServers: await controller.getLocalMcpServers(), busy: !!operation }));
+    res.json(sanitize({ status, logs: safeLogs(), workspaces: config.workspaces, codexDefaults: config.codexDefaults, revision: revision(config.key), codexStatus, codexBindings: bindings, localMcpServers: await controller.getLocalMcpServers(), connectionSetup: await readConnectionSetupStatus(configPath, connectionSetupState), busy: !!operation }));
   });
   app.post("/api/action", async (req, res) => {
     const parsed = actionSchema.safeParse(req.body);
@@ -147,11 +151,31 @@ export async function launchMacControlUi(configPath: string, options: MacControl
       return;
     }
     if (operation) { res.status(409).json({ error: "正在执行操作，请稍后重试" }); return; }
+    if (input.action === "connection-setup" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再配置连接。" }); return; }
     if (input.action === "save-config" && controller.lifecycleState !== "stopped") {
       res.status(409).json({ error: "请先停止 Bridge 再保存配置" }); return;
     }
     const task = (async () => {
-      if (input.action === "start") await controller.start();
+      if (input.action === "connection-setup") {
+        const runtimeKey = input.input.runtimeKey;
+        let persisted = false;
+        if (runtimeKey) secrets.add(runtimeKey);
+        connectionSetupState = { running: true, success: false, progress: "正在检查本机配置…", error: "" };
+        try {
+          await runConnectionSetup(configPath, input.input, message => {
+            connectionSetupState = { running: true, success: false, progress: redact(message), error: "" };
+          });
+          await refreshSecrets(await readFile(configPath, "utf8"));
+          persisted = true;
+          connectionSetupState = { running: false, success: true, progress: "连接配置已保存，可以启动 Bridge。", error: "" };
+        } catch (error) {
+          const message = redact(error instanceof Error ? error.message : "连接配置失败。");
+          connectionSetupState = { running: false, success: false, progress: "连接配置未完成", error: message };
+          throw new Error(message);
+        } finally {
+          if (runtimeKey && !persisted) secrets.delete(runtimeKey);
+        }
+      } else if (input.action === "start") await controller.start();
       else if (input.action === "stop") await controller.stop();
       else if (input.action === "restart") { await controller.stop(); await controller.start(); }
       else if (input.action === "save-config") {

@@ -21,3 +21,51 @@
   .tree-row .small.mode-handoff{background:#3d304e;color:#c6a5f2}
   .log-row.level-warn .log-message{color:#d0b778}
 }
+
+/* Inline first-run connection setup, kept inside the existing control console. */
+.setup-banner{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 18px;border-color:#f1d39b;background:#fffbf2}
+.setup-banner-copy{display:flex;align-items:center;gap:12px;min-width:0}
+.setup-banner-icon{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:50%;background:#fff0ce;color:#9a6700;font-weight:800}
+.setup-banner h2{font-size:14px;margin:0 0 3px}.setup-banner p{margin:0;color:var(--muted);font-size:12px;line-height:1.5}
+.setup-panel{padding:20px;margin-bottom:16px}
+.setup-panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.setup-panel-heading h2{font-size:18px;margin:2px 0 4px}.setup-panel-heading p{font-size:12px;color:var(--muted);margin:0;line-height:1.55}
+.setup-panel-heading .eyebrow{font-size:10px;font-weight:700;letter-spacing:1.3px;margin:0}
+.setup-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.setup-form-grid label,.setup-advanced label{display:flex;flex-direction:column;gap:7px;font-size:12px;font-weight:650;min-width:0}
+.setup-form-grid label:first-child{grid-column:1 / -1}
+.setup-panel input[type=text],.setup-panel input[type=password],.setup-panel input[type=number]{width:100%;min-width:0;border:1px solid var(--border);border-radius:7px;padding:10px 11px;background:var(--input);color:var(--text);outline:none}
+.setup-panel input:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px #1674df22}
+.setup-hint{font-size:11px;color:var(--muted);margin:7px 0 14px;line-height:1.55}
+.setup-advanced{border:1px solid var(--border);border-radius:8px;padding:0 12px;margin:0 0 14px;background:var(--bg)}
+.setup-advanced summary{cursor:pointer;padding:11px 0;font-size:12px;font-weight:650;user-select:none}
+.setup-advanced label{padding:0 0 2px}
+.setup-check{display:flex;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:8px;padding:12px;margin:0 0 14px;cursor:pointer}
+.setup-check input{margin:3px 0 0;accent-color:var(--accent)}
+.setup-check strong,.setup-check small{display:block}.setup-check strong{font-size:12px}.setup-check small{font-size:11px;color:var(--muted);margin-top:3px}
+.setup-progress{border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)}
+.setup-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px}
+.setup-progress p{font-size:11px;color:var(--muted);margin:7px 0 0;line-height:1.5}
+.progress-track{height:4px;border-radius:5px;background:#dce6f1;overflow:hidden;margin-top:10px}
+.progress-track span{display:block;width:35%;height:100%;border-radius:5px;background:var(--accent);animation:setup-progress 1.2s ease-in-out infinite alternate}
+@keyframes setup-progress{from{transform:translateX(-5%)}to{transform:translateX(210%)}}
+.setup-actions{display:flex;justify-content:flex-end;margin-top:14px}
+.badge.warn{background:#fff4d6;color:#9a6700}
+@media(prefers-color-scheme:dark){
+ .setup-banner{background:#332d20;border-color:#55452b}.setup-banner-icon{background:#4a3c21;color:#f3c96b}
+ .progress-track{background:#384354}
+}
+@media(max-width:700px){
+ .setup-banner{align-items:flex-start;flex-direction:column}.setup-form-grid{grid-template-columns:1fr}.setup-form-grid label:first-child{grid-column:auto}
+}
+@media(prefers-reduced-motion:reduce){.progress-track span{animation:none!important}}
+/* Settings are grouped in one header menu; the main connection wizard stays inline. */
+.settings-anchor{position:relative;display:inline-flex}
+.settings-menu{position:absolute;z-index:50;right:0;top:calc(100% + 8px);width:275px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 12px 28px #17233428;padding:10px}
+.settings-menu[hidden]{display:none!important}
+.settings-menu-title{font-size:12px;font-weight:650;padding:6px 8px 9px}
+.settings-menu-item{display:flex;width:100%;justify-content:space-between;align-items:center;border:0;text-align:left;padding:10px 9px;background:transparent;font-size:12px}
+.settings-menu-item span{font-size:18px;color:var(--muted)}
+.settings-menu-caption{font-size:11px;font-weight:600;padding:5px 8px 2px}
+.settings-menu-note{font-size:11px;line-height:1.55;color:var(--muted);padding:1px 8px 6px}
+.settings-menu-divider{height:1px;background:var(--border);margin:6px 2px}

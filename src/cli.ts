@@ -23,7 +23,7 @@ import {
 } from "./commands/index.js";
 import { WorkspaceRegistry } from "./workspaces/workspace-registry.js";
 import { BridgeController, listenBridge } from "./control/bridge-controller.js";
-import { launchControlUi, launchSetupUi } from "./ui/control-console.js";
+import { launchControlUi } from "./ui/control-console.js";
 
 
 interface CliOptions {
@@ -222,19 +222,6 @@ async function ui(options: CliOptions): Promise<number> {
   return 0;
 }
 
-async function setupUi(options: CliOptions): Promise<number> {
-  const setupUi = await launchSetupUi(options.configPath);
-  let stopping = false;
-  const shutdown = async (): Promise<void> => {
-    if (stopping) return;
-    stopping = true;
-    await setupUi.close();
-  };
-  process.once("SIGINT", () => void shutdown());
-  process.once("SIGTERM", () => void shutdown());
-  console.log("Tunnel 图形配置向导已打开。关闭窗口后退出配置向导。");
-  return 0;
-}
 async function start(options: CliOptions): Promise<number> {
   let stopping = false;
   const controller = new BridgeController(
@@ -272,7 +259,7 @@ async function start(options: CliOptions): Promise<number> {
 export async function runCli(args: readonly string[]): Promise<number> {
   const [command = "help", ...commandArgs] = args;
   const options = parseOptions(commandArgs);
-  if (command === "setup") return setupUi(options);
+  if (command === "setup") return ui(options);
   if (command === "init") return init(options);
   if (command === "doctor") return doctor(options);
   if (command === "serve") return serve(options);

@@ -7,9 +7,50 @@
 <body>
 <header class="topbar">
   <div class="brand"><img src="/icons/chatgpt-mcp-bridge.png" alt="" width="38" height="38"><div><h1>ChatGPT MCP Bridge</h1><p>本机项目，与 ChatGPT 保持连接。</p></div></div>
-  <div class="toolbar"><button id="restart" class="icon-button" title="重新启动 Bridge 与 Tunnel" aria-label="重新启动">↻</button><button id="stop">停止</button><button id="start" class="primary">▶ 启动服务</button></div>
+  <div class="toolbar">
+    <button id="restart" class="icon-button" title="重新启动 Bridge 与 Tunnel" aria-label="重新启动">↻</button>
+    <button id="stop">停止</button>
+    <div class="settings-anchor">
+      <button id="settings-toggle" aria-expanded="false" aria-controls="settings-menu">设置</button>
+      <div id="settings-menu" class="settings-menu" hidden>
+        <p class="settings-menu-title">本机设置</p>
+        <button id="settings-open-connection" class="settings-menu-item">连接配置 <span>›</span></button>
+        <div class="settings-menu-divider"></div>
+        <p class="settings-menu-caption">SSH 主机管理</p>
+        <p class="settings-menu-note">macOS Keychain 凭据管理尚未实现。Windows 可在设置中添加、修改和删除主机。</p>
+        <div class="settings-menu-divider"></div>
+        <p class="settings-menu-caption">Codex 默认值</p>
+        <p id="settings-codex-summary" class="settings-menu-note">从本机配置读取…</p>
+      </div>
+    </div>
+    <button id="start" class="primary">▶ 启动服务</button>
+  </div>
 </header>
 <main>
+  <section id="connection-setup-banner" class="setup-banner panel" hidden aria-live="polite">
+    <div class="setup-banner-copy"><span class="setup-banner-icon" aria-hidden="true">!</span><div><h2 id="setup-banner-title">连接配置尚未完成</h2><p id="setup-banner-summary">正在检查本机配置…</p></div></div>
+    <button id="setup-banner-open" class="primary">打开连接向导</button>
+  </section>
+  <section id="connection-setup-panel" class="setup-panel panel" hidden aria-labelledby="setup-panel-title">
+    <div class="setup-panel-heading"><div><p class="eyebrow">FIRST-RUN SETUP</p><h2 id="setup-panel-title">连接向导</h2><p>在当前控制台完成 Tunnel 配置。配置仅保存在本机，不会同步到 GitHub。</p></div><button id="setup-cancel" class="icon-button" aria-label="关闭连接向导" title="关闭">×</button></div>
+    <form id="connection-setup-form" autocomplete="off">
+      <div class="setup-form-grid">
+        <label for="setup-tunnel-id">Tunnel ID<input id="setup-tunnel-id" name="tunnelId" type="text" placeholder="tunnel_..." pattern="tunnel_[A-Za-z0-9_-]{1,128}" maxlength="135" spellcheck="false" required></label>
+        <label for="setup-runtime-key">Runtime API key<input id="setup-runtime-key" name="runtimeKey" type="password" placeholder="首次配置时填写" autocomplete="new-password" spellcheck="false"></label>
+        <label for="setup-health-port">Tunnel 健康检查端口<input id="setup-health-port" name="healthPort" type="number" min="1024" max="65535" step="1" value="8080" required></label>
+      </div>
+      <p id="setup-key-hint" class="setup-hint">密钥仅写入本机 .env；已有密钥可以留空保留。</p>
+      <details class="setup-advanced">
+        <summary>高级设置</summary>
+        <label for="setup-bridge-port">Bridge 监听端口<input id="setup-bridge-port" name="bridgePort" type="number" min="1" max="65535" step="1" value="3000" required></label>
+        <p class="setup-hint">修改端口前请先停止 Bridge。保存时会同步更新本机配置和 Tunnel MCP 地址。</p>
+      </details>
+      <label class="setup-check"><input id="setup-reuse-client" type="checkbox"><span><strong>复用本机已安装的 Tunnel Client</strong><small>创建独立 profile，不覆盖原 profile。</small></span></label>
+      <div id="setup-error" class="error-message" role="alert" hidden></div>
+      <div class="setup-progress"><div class="setup-progress-heading"><strong id="setup-progress-title">等待配置</strong><span id="setup-progress-state" class="badge">就绪</span></div><div id="setup-progress-track" class="progress-track" hidden><span></span></div><p id="setup-progress-detail">提交后会下载并校验官方客户端，再初始化本机 profile。</p></div>
+      <div class="setup-actions"><button id="setup-submit" class="primary" type="submit">验证并保存配置</button></div>
+    </form>
+  </section>
   <section class="connection panel" aria-label="连接链路">
     <div class="section-heading"><h2>连接链路</h2><div class="service-meta"><span id="lifecycle" class="badge">正在连接控制台</span><span id="runtime-meta"></span></div></div>
     <div class="chain" id="chain"></div><div id="service-error" class="error-message" hidden></div>
