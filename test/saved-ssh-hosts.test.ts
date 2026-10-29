@@ -66,7 +66,7 @@ test("saved SSH credential operations clearly report missing macOS Keychain supp
     await rm(dir, { recursive: true, force: true });
   }
 });
-test("SSH aliases persist across Bridge restarts without storing plaintext passwords", async () => {
+test("SSH aliases persist across Bridge restarts without storing plaintext passwords", { skip: process.platform !== "win32" }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-alias-test-"));
   const metadataPath = path.join(dir, ".mcp-bridge-state", "ssh-hosts.json");
   const vault = new FakeVault();
@@ -100,7 +100,7 @@ test("SSH aliases persist across Bridge restarts without storing plaintext passw
   }
 });
 
-test("saved SSH connects through native ssh.exe and injects the secret only into the PTY after a verified prompt", async () => {
+test("saved SSH connects through native ssh.exe and injects the secret only into the PTY after a verified prompt", { skip: process.platform !== "win32" }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-login-test-"));
   const vault = new FakeVault();
   const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "secret-for-test");
@@ -130,7 +130,7 @@ test("saved SSH connects through native ssh.exe and injects the secret only into
   }
 });
 
-test("saved host registration can be canceled without storing a password", async () => {
+test("saved host registration can be canceled without storing a password", { skip: process.platform !== "win32" }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-cancel-test-"));
   const vault = new FakeVault();
   const manager = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => null);
