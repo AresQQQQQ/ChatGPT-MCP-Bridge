@@ -147,8 +147,8 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
             decisionHandler(.allow)
             return
         }
-        // The connection wizard links only to official OpenAI Platform pages; open them in the user's browser.
-        if target.scheme == "https", target.host == "platform.openai.com" {
+        // The connection wizard links only to official OpenAI Platform / ChatGPT pages; open them in the user's browser.
+        if target.scheme == "https", ["platform.openai.com", "chatgpt.com", "help.openai.com"].contains(target.host ?? "") {
             NSWorkspace.shared.open(target)
         }
         decisionHandler(.cancel)

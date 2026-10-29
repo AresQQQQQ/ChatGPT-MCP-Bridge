@@ -40,6 +40,18 @@ Copy-Item .env.example .env
 
 Bridge 会自动把本地 Bearer 认证头传给隧道客户端。等待 Bridge 与 Tunnel 两个 `READY` 状态，并保持进程运行。也可用 `.\bridge-ui.cmd` 打开 Windows 控制窗口。
 
+## 必需步骤：在 ChatGPT 创建 MCP 插件
+
+**Tunnel ID 与 Runtime API key 只完成了本机 Tunnel 运行配置，不会自动在 ChatGPT 创建插件。** 本机 Bridge 与 Tunnel 启动并就绪后，还需要在 ChatGPT 完成一次连接器创建：
+
+1. 打开 [ChatGPT Plugins](https://chatgpt.com/plugins)，点击加号，选择 Add custom MCP server。
+2. 输入名称，例如 ChatGPT MCP Bridge；Connection 选择 Tunnel。
+3. 选择已有 Tunnel，或粘贴本机向导中使用的同一个 tunnel_id。
+4. 认证通常选择无额外认证（No authentication）；确认风险提示，然后点击 Create as a plugin。Tunnel Client 会按本机 Bridge 配置处理本机连接认证。
+5. 检查发现的工具；新建 ChatGPT 对话，使用 @ 选择插件，并调用一个安全的只读工具验证。
+
+Runtime API key 只供本机 tunnel-client 连接 OpenAI 控制平面使用，不要把它填进 ChatGPT 插件的认证栏。Tunnel 的 Platform 组织权限与目标 ChatGPT 工作空间权限是分开的；若 Tunnel 不出现在列表中，检查它是否关联目标 ChatGPT workspace，以及操作者是否有 Tunnels Read + Use 权限。详细步骤见 [OpenAI 官方说明](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)。
+
 ## macOS Apple Silicon
 
 Mac 版源码位于 `main` 分支。在 Mac 本地 SSD 上 clone 该分支，不在 SMB 共享盘运行依赖、Git 或 Tunnel：

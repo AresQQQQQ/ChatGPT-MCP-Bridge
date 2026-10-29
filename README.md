@@ -144,12 +144,15 @@ GitHub Actions 在 Windows 与 Apple Silicon macOS runner 上分别运行安装�
 Windows Credential Manager 与保存密码的交互式 SSH 登录仍为 Windows 专属能力；macOS 尚未实现 Keychain 适配，相关 SSH 凭据操作会明确报告不支持，不会把该功能描述为跨平台可用。
 ## 连接 ChatGPT
 
-1. 在 ChatGPT 网页端打开 **设置 → 安全与登录 → 开发者模式**。
-2. 进入 **Plugins/插件**，通过加号创建开发者应用，名称可填 `ChatGPT MCP Bridge`。
-3. 连接方式选择 **Tunnel**，选择已创建的隧道或填入其 `tunnel_id`。
-4. 在对话输入框的加号菜单中选择开发者模式，启用这个应用。已有可用的 Bridge 应用时可复用。
+本地向导保存 Tunnel ID 和 Runtime API key **不会自动在 ChatGPT 创建插件**。本机 Bridge 与 Tunnel 启动并就绪后，还需完成以下步骤：
 
-入口名称和可用性以账号界面为准，参见[官方开发者模式指南](https://developers.openai.com/api/docs/guides/developer-mode)。不要把本机 `http://127.0.0.1:3000/mcp` 填成云端连接地址；本教程通过 Tunnel 接入。
+1. 打开 [ChatGPT Plugins](https://chatgpt.com/plugins)，点击加号，选择 **Add custom MCP server**。
+2. 输入名称，例如 `ChatGPT MCP Bridge`；Connection 选择 **Tunnel**。
+3. 选择已创建并关联到目标 ChatGPT 工作空间的隧道，或粘贴本地向导使用的同一个 `tunnel_id`。
+4. 认证通常选择无额外认证（No authentication）；确认风险提示，然后点击 **Create as a plugin**。Tunnel Client 会按本机 Bridge 配置处理本机连接认证。
+5. 检查发现的工具；新建对话，在输入框使用 `@` 选择插件，并调用一个安全的只读工具验证。
+
+Runtime API key 只供本机 Tunnel Client 连接 OpenAI 控制平面使用，不要填入 ChatGPT 插件的认证栏。不要把本机 `http://127.0.0.1:3000/mcp` 填成云端连接地址；本教程通过 Tunnel 接入。详细步骤参见 [OpenAI 官方连接说明](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)。
 
 ## 配置 ChatGPT 项目
 

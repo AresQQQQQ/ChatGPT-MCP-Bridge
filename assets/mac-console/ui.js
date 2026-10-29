@@ -48,7 +48,7 @@ function renderChain() {
   const signature = JSON.stringify([s, c]); if (signature === chainSignature) return; chainSignature = signature;
   const connected = s.tunnel === "connected";
   const nodes = [
-    ["chatgpt", "ChatGPT", connected ? "Tunnel 可连接" : "等待隧道", connected ? "good" : ""],
+    ["chatgpt", "ChatGPT", connected ? "Tunnel 就绪；插件状态未知" : "等待隧道", connected ? "good" : ""],
     ["secure-tunnel", "Secure Tunnel", connected ? "已连接" : s.tunnel === "error" ? "连接异常" : "未连接", connected ? "good" : s.tunnel === "error" ? "bad" : ""],
     ["mcp", "MCP", s.mcp === "available" ? "工具服务可用" : "未运行", s.mcp === "available" ? "good" : ""],
     ["mcp-bridge", "MCP Bridge", s.bridge === "running" ? "运行中" : s.state === "error" ? "服务异常" : "已停止", s.bridge === "running" ? "good" : s.state === "error" ? "bad" : ""],
@@ -219,7 +219,7 @@ function renderConnectionSetup() {
   $("setup-progress-track").hidden = !running;
   $("setup-progress-detail").textContent = running
     ? "连接参数已保存，正在准备或验证 Tunnel profile。"
-    : state.ready ? "连接已配置完成。修改 Tunnel ID 或 Runtime API key，请前往设置。" : "参数保存后会安装或复用 Tunnel Client，并初始化本机 profile；失败时已保存的参数仍会保留。";
+    : state.ready ? "本机 Tunnel profile 已就绪。ChatGPT 插件仍需单独创建；请按上方第 3 步启动服务并完成插件配置。修改本机参数请前往设置。" : "参数保存后会安装或复用 Tunnel Client，并初始化本机 profile；失败时已保存的参数仍会保留。";
   const busy = running || localBusy || snapshot.busy || snapshot.status.state !== "stopped";
   $("setup-tunnel-id").disabled = busy || Boolean(state.hasTunnelId);
   $("setup-runtime-key").disabled = busy || Boolean(state.hasRuntimeKey);
@@ -228,10 +228,7 @@ function renderConnectionSetup() {
   $("setup-cancel").disabled = running || localBusy || Boolean(snapshot.busy);
   if (state.success && !lastSetupSuccess) {
     $("setup-runtime-key").value = "";
-    setupOpen = false;
-    setupInitialized = false;
-    if (dialog.open) dialog.close();
-    toast("连接配置已保存，可以启动服务。");
+    toast("本机 Tunnel 已配置；还需在 ChatGPT Plugins 创建或确认插件。");
   }
   lastSetupSuccess = Boolean(state.success);
 }

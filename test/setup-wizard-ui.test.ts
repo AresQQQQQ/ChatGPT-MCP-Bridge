@@ -30,6 +30,9 @@ test("Windows main console embeds connection setup and keeps the Runtime API key
   assert.match(source, /x:Name="SettingsTunnelIdBox"/u);
   assert.match(source, /https:\/\/platform\.openai\.com\/settings\/organization\/tunnels/u);
   assert.match(source, /https:\/\/platform\.openai\.com\/settings\/organization\/api-keys/u);
+  assert.match(source, /SetupOpenChatGPTPluginsButton/u);
+  assert.match(source, /https:\/\/chatgpt\.com\/plugins/u);
+  assert.match(source, /Create as a plugin/u);
   assert.doesNotMatch(source, /x:Name="SetupBridgePortBox"/u);
   assert.doesNotMatch(source, /x:Name="SetupHealthPortBox"/u);
   assert.match(source, /Update-ConnectionSetup\(\$message\)/u);
@@ -50,6 +53,9 @@ test("macOS main console embeds the same connection setup fields and posts to it
   assert.ok(html.includes('id="setup-runtime-key-locked"'));
   assert.ok(html.includes("打开 Tunnel 管理页面") || html.includes("organization/tunnels"));
   assert.ok(html.includes("organization/api-keys"));
+  assert.ok(html.includes("https://chatgpt.com/plugins"));
+  assert.ok(html.includes("Create as a plugin"));
+  assert.ok(html.includes("Tunnel 就绪不代表 ChatGPT 插件已创建"));
   assert.ok(!html.includes('id="setup-health-port"'));
   assert.ok(!html.includes('id="setup-bridge-port"'));
   assert.ok(html.includes('id="connection-setup-dialog"'));
@@ -65,6 +71,8 @@ test("macOS main console embeds the same connection setup fields and posts to it
   assert.ok(js.includes('dialog.showModal()'));
   assert.ok(js.includes("state.legacyTunnelIdUnknown"));
   assert.ok(js.includes("renderConnectionSetup"));
+  assert.ok(js.includes("Tunnel 就绪；插件状态未知"));
+  assert.ok(js.includes("本机 Tunnel 已配置；还需在 ChatGPT Plugins 创建或确认插件"));
   assert.ok(server.includes('action: z.literal("connection-setup")'));
   assert.ok(server.includes('action: z.literal("save-api-port-settings")'));
   assert.ok(server.includes("readConnectionSetupStatus(configPath, connectionSetupState)"));
@@ -112,7 +120,7 @@ test("setup.command now routes into the main UI entry point", async () => {
 
 test("macOS connection wizard opens official acquisition links in the external browser", async () => {
   const swift = await readFile(path.resolve("src/ui/macos/BridgeControlApp.swift"), "utf8");
-  assert.match(swift, /target\.host == "platform\.openai\.com"/u);
+  assert.match(swift, /"platform\.openai\.com", "chatgpt\.com", "help\.openai\.com"/u);
   assert.match(swift, /NSWorkspace\.shared\.open\(target\)/u);
   assert.match(swift, /decisionHandler\(\.cancel\)/u);
 });

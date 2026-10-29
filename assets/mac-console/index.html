@@ -37,11 +37,15 @@
     <div class="setup-panel-heading"><div><p class="eyebrow">FIRST-RUN SETUP</p><h2 id="setup-panel-title">连接向导</h2><p>在当前控制台完成 Tunnel 配置。配置仅保存在本机，不会同步到 GitHub。</p></div><button id="setup-cancel" class="icon-button" aria-label="关闭连接向导" title="关闭">×</button></div>
     <div class="setup-guidance">
       <h3>1. 获取 Tunnel ID</h3>
-      <p>在 OpenAI Platform 创建或打开一个隧道，复制以 <code>tunnel_</code> 开头的 <code>tunnel_id</code>。这个 ID 也需要在 ChatGPT 应用的 Tunnel 连接中选择。</p>
+      <p>在 OpenAI Platform 创建或打开一个隧道，确认已关联到实际使用的 ChatGPT 工作空间，再复制以 <code>tunnel_</code> 开头的 <code>tunnel_id</code>。这个 ID 也需要在 ChatGPT 插件的 Tunnel 连接中选择。</p>
       <p><a href="https://platform.openai.com/settings/organization/tunnels" target="_blank" rel="noopener noreferrer">打开 Tunnel 管理页面 ↗</a></p>
       <h3>2. 获取 Runtime API key</h3>
       <p>在同一 Platform 组织创建 Runtime API key，并确认具有 Tunnels Read + Use 权限。不要使用 Admin API key。</p>
       <p><a href="https://platform.openai.com/settings/organization/api-keys" target="_blank" rel="noopener noreferrer">打开 Runtime API keys ↗</a></p>
+      <h3>3. 在 ChatGPT 创建 MCP 插件（必需）</h3>
+      <p>保存本机配置后，先关闭向导并启动 Bridge 与 Tunnel，再打开 ChatGPT Plugins，选择「+ → Add custom MCP server」。Connection 选 Tunnel，选择或粘贴上面的同一个 Tunnel ID，认证选项按当前 Bridge 配置处理（通常为无额外认证），确认风险提示后点击「Create as a plugin」。</p>
+      <p><strong>注意：</strong>Runtime API key 只供本机 Tunnel Client 使用，不要粘贴到 ChatGPT 插件认证栏。Tunnel 就绪不代表 ChatGPT 插件已创建。</p>
+      <p><a href="https://chatgpt.com/plugins" target="_blank" rel="noopener noreferrer">打开 ChatGPT Plugins ↗</a> · <a href="https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt" target="_blank" rel="noopener noreferrer">查看官方步骤 ↗</a></p>
     </div>
     <form id="connection-setup-form" autocomplete="off">
       <div id="setup-tunnel-id-field" class="setup-field">
