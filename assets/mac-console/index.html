@@ -19,7 +19,8 @@
         <button id="settings-open-api-ports" class="settings-menu-item">连接设置 <span>›</span></button>
         <div class="settings-menu-divider"></div>
         <p class="settings-menu-caption">SSH 主机管理</p>
-        <p class="settings-menu-note">macOS Keychain 凭据管理尚未实现。Windows 可在设置中添加、修改和删除主机。</p>
+        <p id="settings-ssh-summary" class="settings-menu-note">主机密码安全保存在本机 Keychain。</p>
+        <button id="settings-open-ssh-hosts" class="settings-menu-item">管理 SSH 主机 <span id="ssh-host-count">›</span></button>
         <div class="settings-menu-divider"></div>
         <p class="settings-menu-caption">Codex 默认值</p>
         <p id="settings-codex-summary" class="settings-menu-note">从本机配置读取…</p>
@@ -49,6 +50,28 @@
       <p id="codex-defaults-hint" class="setup-hint">请先停止 Bridge，再修改默认值。</p>
       <div id="codex-defaults-error" class="error-message" role="alert" hidden></div>
       <div class="setup-actions"><button id="codex-defaults-cancel" type="button">取消</button><button id="codex-defaults-save" class="primary" type="submit">保存配置</button></div>
+    </form>
+  </section>
+</dialog>
+<dialog id="ssh-hosts-dialog" class="setup-dialog ssh-hosts-dialog" aria-labelledby="ssh-hosts-title">
+  <section class="setup-panel panel">
+    <div class="setup-panel-heading"><div><p class="eyebrow">SECURE SSH HOSTS</p><h2 id="ssh-hosts-title">全局 SSH 主机</h2><p>主机列表在本机保存；密码只存入 macOS Keychain，不写入配置文件。</p></div><button id="ssh-hosts-close" class="icon-button" aria-label="关闭 SSH 主机管理" title="关闭">×</button></div>
+    <div id="ssh-hosts-error" class="error-message" role="alert" hidden></div>
+    <p id="ssh-hosts-summary" class="setup-hint">正在读取主机列表…</p>
+    <div id="ssh-host-list" class="ssh-host-list"></div>
+    <div id="ssh-host-list-actions" class="setup-actions"><button id="ssh-host-add" class="primary" type="button">添加 SSH 主机</button></div>
+    <form id="ssh-host-form" class="ssh-host-form" autocomplete="off" hidden>
+      <h3 id="ssh-host-form-title">添加 SSH 主机</h3>
+      <div class="setup-form-grid">
+        <label for="ssh-host-id">主机别名<input id="ssh-host-id" type="text" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,63}" placeholder="例如 pve" spellcheck="false" required></label>
+        <label for="ssh-host-address">IP 地址或域名<input id="ssh-host-address" type="text" maxlength="253" placeholder="192.168.2.31" spellcheck="false" required></label>
+        <label for="ssh-host-username">用户名<input id="ssh-host-username" type="text" maxlength="64" pattern="[A-Za-z_][A-Za-z0-9_.-]{0,63}" placeholder="root" spellcheck="false" required></label>
+        <label for="ssh-host-port">SSH 端口<input id="ssh-host-port" type="number" min="1" max="65535" value="22" required></label>
+        <label class="ssh-password-field" for="ssh-host-password">SSH 密码<input id="ssh-host-password" type="password" maxlength="1200" autocomplete="new-password" placeholder="仅在新增或更换密码时填写"></label>
+      </div>
+      <p id="ssh-host-form-hint" class="setup-hint">密码仅在本机通过 Keychain 保存，不会返回给 ChatGPT 或写入日志。</p>
+      <div id="ssh-host-form-error" class="error-message" role="alert" hidden></div>
+      <div class="setup-actions"><button id="ssh-host-form-cancel" type="button">取消</button><button id="ssh-host-form-save" class="primary" type="submit">保存主机</button></div>
     </form>
   </section>
 </dialog>

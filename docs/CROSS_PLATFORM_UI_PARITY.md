@@ -26,8 +26,8 @@
 | MCP 探测详情 | 可用性、工具数量、延迟、错误 | 可用性、工具数量、延迟、错误 | 基本对齐 | 全局总览应复用已有 snapshot 字段 |
 | 整体健康状态摘要 | 综合 Bridge、MCP、Tunnel、Codex 状态显示运行正常 / 部分链路未连接 | 已增加与 Windows 对应的聚合健康徽标，展示运行正常、Codex 未连接、链路不完整和服务异常 | UI 已对齐（当前规则镜像，待 CI 验证） | 后续可将规则进一步提取为共享状态契约，避免 PowerShell 与 JavaScript 逻辑漂移 |
 | Codex 默认模型 / 推理等级 | 设置中可编辑并保存 | 已新增编辑对话框和 `save-codex-defaults` API；复用共享配置写入、模型/推理等级校验和 revision 冲突保护 | 已补齐（本次实现，待 CI 验证） | 保持停止服务后保存，并验证外部并发修改时拒绝覆盖 |
-| SSH 主机 CRUD | 全局主机列表，新增、修改、删除、刷新、密码状态 | UI 明确说明 Keychain 凭据管理尚未实现；无等价主机 API | 平台服务缺失 | **P2：先实现 macOS Keychain adapter，再接统一 SSH host service/UI** |
-| SSH 密码安全存储 | Windows Credential Manager | macOS Keychain adapter 尚未实现 | 平台适配差异 | 不得用明文配置或假 UI 代替；单独实现并测试安全存储 |
+| SSH 主机 CRUD | 全局主机列表，新增、修改、删除、刷新、密码状态 | 已新增全局主机管理对话框与受认证的 list/save/remove API，支持新增、编辑、别名重命名、删除和凭据状态 | 已实现（待 CI 与首次真实 Keychain 使用验收） | 使用共享主机元数据模型，不把密码写入文件或返回给 UI/API 调用方 |
+| SSH 密码安全存储 | Windows Credential Manager | 新增 `MacKeychainVault`，通过原生 Security framework helper 读写用户 Keychain；密码通过 stdin/stdout 传递，不进入进程参数 | 已实现（待首次真实 Keychain 使用验收） | Keychain helper 首次使用时在本机编译，产物放入被 Git 忽略的 `.mcp-bridge-state` |
 | 日志自动滚动 | 支持 | 支持 | 已对齐 | 保持行为一致 |
 | 日志级别展示 | 独立级别列，警告/错误着色 | 已增加独立的文字级别列，并保留现有颜色分类 | UI 已补齐（待 CI 验证） | Windows 可考虑增加筛选，但应保留 Mac 已有筛选能力 |
 | 日志筛选 / 搜索 | 当前 UI 无同等的来源筛选、关键词搜索入口 | 支持来源筛选、关键词搜索 | Mac 更丰富 | 保留 Mac 优势；后续评估是否将筛选能力引入 Windows |
@@ -40,7 +40,7 @@
 
 - Windows UI：`src/ui/windows-console.ts`，包含 `LocalMcpButton`、`LocalMcpPopup`、SSH 主机设置、Codex 默认值编辑和 `Update-OverallStatus`。
 - macOS UI：`assets/mac-console/index.html`、`assets/mac-console/ui.js`。
-- macOS 控制 API：`src/ui/mac-console.ts` 的 `save-config` 管理工作区；新增 `save-codex-defaults` action 管理全局 Codex 默认值；仍没有 SSH host CRUD action。
+- macOS 控制 API：`src/ui/mac-console.ts` 的 `save-config` 管理工作区，`save-codex-defaults` 管理全局 Codex 默认值；新增受认证的 `/api/ssh/hosts`、`/api/ssh/save`、`/api/ssh/remove` 路由。
 - 共享核心：`src/control/bridge-controller.ts` 已提供 `getLocalMcpServers`、`loadLocalMcpServer`、`unloadLocalMcpServer`、`probeLocalMcpServer`。
 - 配置保存：`src/ui/workspace-config.ts` 的写入选项已支持 `codexDefaults`，因此 Codex 默认值差异主要在 Mac UI/API 接线和验证，不需要重写配置存储层。
 
@@ -50,7 +50,7 @@
 2. **P1：统一整体健康状态摘要。** Mac 已补齐与 Windows 相同的聚合结论；后续可进一步把规则抽成共享状态契约，并为各异常状态增加对应原因说明。
 3. **P1：Codex 默认值编辑。** 已新增独立的 `save-codex-defaults` action，复用 `revision` 检查和 `writeWorkspaceConfig`；待本次 CI 验证。
 4. **P2：日志 UI 语义对齐。** Mac 已增加可见日志级别文字；Windows 日志筛选属于可选增强，不应因此削弱 Mac 已有功能。
-5. **P2：macOS SSH host / Keychain。** 作为独立平台适配项目实现，完成 Keychain 安全存取后再开放 CRUD UI。
+5. **P2：macOS SSH host / Keychain。** 已实现 Keychain adapter、隐藏密码对话框、全局主机 CRUD API/UI 和平台 OpenSSH 连接；后续需要在目标 Mac 上首次保存/读取/删除一条测试凭据，确认系统 Keychain 授权交互符合预期。
 
 ## 验收原则
 

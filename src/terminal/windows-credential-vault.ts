@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import type { CredentialVault } from "./credential-vault.js";
+export type { CredentialVault } from "./credential-vault.js";
 
 export class CredentialVaultError extends Error {
   public constructor(message = "Windows Credential Manager operation failed") {
@@ -177,13 +179,6 @@ async function operate(action: VaultAction, target: string, username = "", secre
     if (secret !== undefined) child.stdin.end(Buffer.from(secret, "utf8"));
     else child.stdin.end();
   });
-}
-
-export interface CredentialVault {
-  save(target: string, username: string, password: string): Promise<void>;
-  read(target: string): Promise<string>;
-  exists(target: string): Promise<boolean>;
-  delete(target: string): Promise<void>;
 }
 
 export class WindowsCredentialVault implements CredentialVault {

@@ -51,17 +51,41 @@ class FakePty {
   }
 }
 
-test("saved SSH credential operations clearly report missing macOS Keychain support", { skip: process.platform === "win32" }, async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-keychain-unsupported-"));
+test("global SSH host CRUD stores passwords only in the injected credential vault", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-global-hosts-"));
+  const metadataPath = path.join(dir, "ssh-hosts.json");
+  const vault = new FakeVault();
+  const manager = new SavedSshHostManager(metadataPath, vault, async () => "unused");
   try {
-    const manager = new SavedSshHostManager(path.join(dir, "hosts.json"), new FakeVault(), async () => "unused");
-    await assert.rejects(manager.save({
-      workspaceId: "workspace",
-      hostId: "router",
-      host: "192.0.2.1",
-      username: "admin",
+    const saved = await manager.saveGlobalFromUi({
+      hostId: "pve",
+      host: "192.0.2.31",
+      username: "root",
       port: 22,
-    }), /macOS Keychain support is not implemented/u);
+      password: "private-test-password",
+    });
+    assert.deepEqual(saved, { workspaceId: "global", hostId: "pve", host: "192.0.2.31", username: "root", port: 22 });
+    let raw = await readFile(metadataPath, "utf8");
+    assert.doesNotMatch(raw, /private-test-password/u);
+    assert.equal(vault.entries.get("MCPBridge/SSH/global/pve"), "private-test-password");
+    assert.deepEqual(await manager.listGlobal(), [{
+      workspaceId: "global", hostId: "pve", host: "192.0.2.31", username: "root", port: 22, credentialAvailable: true,
+    }]);
+
+    await manager.saveGlobalFromUi({
+      previousHostId: "pve",
+      hostId: "pve-main",
+      host: "192.0.2.31",
+      username: "root",
+      port: 2222,
+    });
+    assert.equal(vault.entries.has("MCPBridge/SSH/global/pve"), false);
+    assert.equal(vault.entries.get("MCPBridge/SSH/global/pve-main"), "private-test-password");
+    raw = await readFile(metadataPath, "utf8");
+    assert.doesNotMatch(raw, /private-test-password/u);
+    assert.deepEqual(await manager.removeGlobal("pve-main"), { removed: true });
+    assert.equal(vault.entries.has("MCPBridge/SSH/global/pve-main"), false);
+    assert.deepEqual(await manager.listGlobal(), []);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -127,6 +151,35 @@ test("saved SSH connects through native ssh.exe and injects the secret only into
   } finally {
     terminals.close();
     await rm(dir, { force: true, recursive: true });
+  }
+});
+
+test("saved SSH connects through native OpenSSH on macOS and injects the Keychain secret only after a password prompt", { skip: process.platform !== "darwin" }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-mac-login-test-"));
+  const vault = new FakeVault();
+  const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "unused");
+  const pty = new FakePty();
+  let launch = { executable: "", args: [] as string[] };
+  const terminals = new TerminalSessionManager(async (executable, args) => {
+    launch = { executable, args };
+    setTimeout(() => pty.emit("root@192.0.2.31's password:\r\n"), 15);
+    return pty;
+  });
+  try {
+    await saved.saveGlobalFromUi({ hostId:"pve", host:"192.0.2.31", port:22, username:"root", password:"secret-for-test" });
+    const session = await saved.connect("mac-workspace", dir, "pve", terminals);
+    assert.equal(session.executable, "/usr/bin/ssh");
+    assert.equal(launch.executable, "/usr/bin/ssh");
+    assert.ok(launch.args.includes("StrictHostKeyChecking=yes"));
+    assert.ok(launch.args.includes("root@192.0.2.31"));
+    assert.ok(launch.args.every(arg => !arg.includes("secret-for-test")));
+    assert.deepEqual(pty.writes, ["secret-for-test\r"]);
+    const output = await terminals.read("mac-workspace", session.sessionId);
+    assert.equal(output.output.includes("secret-for-test"), false);
+    terminals.closeSession("mac-workspace", session.sessionId);
+  } finally {
+    terminals.close();
+    await rm(dir, { recursive:true, force:true });
   }
 });
 

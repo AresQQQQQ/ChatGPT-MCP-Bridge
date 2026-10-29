@@ -38,7 +38,30 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     getCodexModuleBindings: async () => [], getLocalMcpServers: async () => [],
     loadLocalMcpServer: async () => ({}), unloadLocalMcpServer: async () => ({}), probeLocalMcpServer: async () => ({}), unbindCodexModule: async () => ({}),
   };
-  const ui = await module.launchMacControlUi!(configPath, { openBrowser: false, controller: controller as never });
+  const savedSshHosts: Array<{hostId:string;host:string;username:string;port:number;password?:string}> = [];
+  const sshHosts = {
+    listGlobal: async () => savedSshHosts.map(({password, ...host}) => ({workspaceId:"global", ...host, credentialAvailable: Boolean(password)})),
+    saveGlobalFromUi: async (input: {hostId:string;host:string;username:string;port:number;previousHostId?:string;password?:string}) => {
+      const oldId = input.previousHostId ?? input.hostId;
+      const index = savedSshHosts.findIndex(host => host.hostId === oldId);
+      const old = index >= 0 ? savedSshHosts[index] : undefined;
+      if (input.previousHostId && !old) throw new Error("Original SSH host was not found");
+      if (!input.previousHostId && old) throw new Error("SSH host alias already exists");
+      const password = input.password ?? old?.password;
+      if (!password) throw new Error("A password is required for a new SSH host");
+      if (savedSshHosts.some(host => host.hostId === input.hostId && host !== old)) throw new Error("SSH host alias already exists");
+      if (old) savedSshHosts.splice(index, 1);
+      savedSshHosts.push({hostId:input.hostId,host:input.host,username:input.username,port:input.port,password});
+      return {workspaceId:"global",hostId:input.hostId,host:input.host,username:input.username,port:input.port};
+    },
+    removeGlobal: async (hostId: string) => {
+      const index = savedSshHosts.findIndex(host => host.hostId === hostId);
+      if (index < 0) return {removed:false};
+      savedSshHosts.splice(index, 1);
+      return {removed:true};
+    },
+  };
+  const ui = await module.launchMacControlUi!(configPath, { openBrowser: false, controller: controller as never, sshHosts: sshHosts as never });
   t.after(async () => { release?.(); await ui.close(); await rm(root, { recursive: true, force: true }); });
   const url = new URL(ui.url), token = url.hash.slice(1), origin = url.origin;
   async function request(route: string, body?: unknown, headers: Record<string,string> = {}) {
@@ -57,6 +80,8 @@ test("Mac console requires per-launch auth and blocks cross-origin/forged-host r
   assert.equal((await f.request("/api/snapshot", undefined, { Authorization: "Bearer wrong" })).status, 401);
   assert.equal((await f.request("/api/action", { action: "start" }, { Origin: "https://evil.example" })).status, 403);
   assert.equal((await f.request("/api/action", { action: "start" }, { Origin: "" })).status, 403);
+  assert.equal((await fetch(f.origin + "/api/ssh/hosts")).status, 401);
+  assert.equal((await f.request("/api/ssh/hosts", undefined, { Origin: "https://evil.example" })).status, 403);
   const http = await import("node:http");
   const forged = await new Promise<number | undefined>((resolve, reject) => {
     const req = http.request(f.origin + "/api/snapshot", { headers: { Host: "evil.example", Authorization: `Bearer ${new URL(f.ui.url).hash.slice(1)}` } }, response => { response.resume(); resolve(response.statusCode); });
@@ -154,6 +179,52 @@ test("Mac console saves Codex defaults with validation, stopped-state guard, and
     defaultModel: "gpt-6-luna",
     defaultEffort: "high",
   })).status, 409);
+});
+
+test("Mac console exposes authenticated global SSH host CRUD without returning passwords", async t => {
+  const f = await fixture(t);
+  const initial = await f.request("/api/ssh/hosts");
+  assert.equal(initial.status, 200);
+  assert.deepEqual((await initial.json()).hosts, []);
+
+  const created = await f.request("/api/ssh/save", {
+    hostId:"pve",
+    host:"192.0.2.31",
+    username:"root",
+    port:22,
+    password:"private-ssh-password",
+  });
+  assert.equal(created.status, 200, JSON.stringify(await created.clone().json().catch(() => ({}))));
+  const createdBody = await created.json();
+  assert.equal(createdBody.host.hostId, "pve");
+  assert.equal(JSON.stringify(createdBody).includes("private-ssh-password"), false);
+
+  const listed = await f.request("/api/ssh/hosts");
+  assert.equal(listed.status, 200);
+  const hosts = await listed.json();
+  assert.deepEqual(hosts.hosts, [{
+    workspaceId:"global",hostId:"pve",host:"192.0.2.31",username:"root",port:22,credentialAvailable:true,
+  }]);
+  assert.equal(JSON.stringify(hosts).includes("private-ssh-password"), false);
+
+  const updated = await f.request("/api/ssh/save", {
+    previousHostId:"pve",
+    hostId:"pve-main",
+    host:"192.0.2.31",
+    username:"root",
+    port:2222,
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(JSON.stringify(await updated.json()).includes("private-ssh-password"), false);
+
+  assert.equal((await f.request("/api/ssh/save", {hostId:"bad",host:"192.0.2.31",username:"root",port:22,extra:"reject"})).status, 400);
+  assert.deepEqual(await (await f.request("/api/ssh/remove", {hostId:"pve-main"})).json(), {removed:true});
+  assert.deepEqual((await (await f.request("/api/ssh/hosts")).json()).hosts, []);
+
+  const config = JSON.parse(await readFile(f.configPath, "utf8"));
+  config.workspaces[0].mode = "workspace";
+  await writeFile(f.configPath, JSON.stringify(config, null, 2));
+  assert.equal((await f.request("/api/ssh/hosts")).status, 400);
 });
 
 test("Mac console protects concurrent config changes and retains workspace policies", async t => {

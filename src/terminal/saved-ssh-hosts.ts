@@ -5,7 +5,9 @@ import { randomUUID } from "node:crypto";
 
 import { promptForLocalPassword } from "./local-password-prompt.js";
 import { TerminalSessionManager, type TerminalView } from "./terminal-sessions.js";
-import { WindowsCredentialVault, type CredentialVault } from "./windows-credential-vault.js";
+import type { CredentialVault } from "./credential-vault.js";
+import { MacKeychainVault } from "./mac-keychain-vault.js";
+import { WindowsCredentialVault } from "./windows-credential-vault.js";
 
 export class SavedSshHostError extends Error {
   public constructor(message: string) {
@@ -75,10 +77,15 @@ function globalCredentialTarget(hostId: string): string {
   return credentialTarget({ workspaceId: GLOBAL_WORKSPACE_ID, hostId });
 }
 
-function requireWindowsCredentialManager(): void {
-  if (process.platform !== "win32") {
-    throw new SavedSshHostError("Saved SSH credentials are Windows-only; macOS Keychain support is not implemented.");
+function requireSupportedCredentialVault(): void {
+  if (process.platform !== "win32" && process.platform !== "darwin") {
+    throw new SavedSshHostError("Saved SSH credentials require Windows Credential Manager or macOS Keychain.");
   }
+}
+
+function defaultCredentialVault(stateFile: string): CredentialVault {
+  if (process.platform === "darwin") return new MacKeychainVault(path.dirname(path.resolve(stateFile)));
+  return new WindowsCredentialVault();
 }
 function isEntry(value: unknown): value is SavedSshHost {
   if (!value || typeof value !== "object") return false;
@@ -111,7 +118,7 @@ export class SavedSshHostManager {
 
   public constructor(
     private readonly stateFile: string,
-    private readonly vault: CredentialVault = new WindowsCredentialVault(),
+    private readonly vault: CredentialVault = defaultCredentialVault(stateFile),
     private readonly prompt: PasswordEntry = promptForLocalPassword,
   ) {}
 
@@ -241,7 +248,7 @@ export class SavedSshHostManager {
   }
 
   public async save(request: SaveSshHostRequest): Promise<{ saved: boolean; host: SavedSshHost }> {
-    requireWindowsCredentialManager();
+    requireSupportedCredentialVault();
     verifyIdentity(request);
     return this.locked(async () => {
       await this.initialize();
@@ -273,7 +280,7 @@ export class SavedSshHostManager {
   }
 
   public async saveGlobalFromUi(request: GlobalUiSaveSshHostRequest): Promise<SavedSshHost> {
-    requireWindowsCredentialManager();
+    requireSupportedCredentialVault();
     const identity = { workspaceId: GLOBAL_WORKSPACE_ID, hostId: request.hostId, host: request.host, username: request.username, port: request.port };
     verifyIdentity(identity);
     if (request.previousHostId !== undefined && !HOST_ID_PATTERN.test(request.previousHostId)) throw new SavedSshHostError("Invalid previous SSH device alias");
@@ -319,7 +326,7 @@ export class SavedSshHostManager {
   }
 
   public async removeGlobal(hostId: string): Promise<{ removed: boolean }> {
-    requireWindowsCredentialManager();
+    requireSupportedCredentialVault();
     if (!HOST_ID_PATTERN.test(hostId)) throw new SavedSshHostError("Invalid SSH device alias");
     return this.locked(async () => {
       await this.initialize();
@@ -345,7 +352,7 @@ export class SavedSshHostManager {
     hostId: string,
     sessions: TerminalSessionManager,
   ): Promise<TerminalView> {
-    requireWindowsCredentialManager();
+    requireSupportedCredentialVault();
     if (!HOST_ID_PATTERN.test(hostId)) throw new SavedSshHostError("Invalid SSH device alias");
     const host = await this.locked(async () => {
       await this.initialize();
@@ -353,11 +360,11 @@ export class SavedSshHostManager {
     });
     if (!host) throw new SavedSshHostError("SSH device alias is not configured in the global host list");
     if (!(await this.vault.exists(globalCredentialTarget(host.hostId)))) {
-      throw new SavedSshHostError("SSH password is not saved in Windows Credential Manager");
+      throw new SavedSshHostError("SSH password is not saved in the local credential vault");
     }
     const destination = isIP(host.host) === 6 ? host.username + "@[" + host.host + "]" : host.username + "@" + host.host;
     const session = await sessions.start(workspaceId, workspaceRoot, {
-      executable: "ssh.exe",
+      executable: process.platform === "win32" ? "ssh.exe" : "/usr/bin/ssh",
       args: [
         "-o", "StrictHostKeyChecking=yes",
         "-o", "UpdateHostKeys=no",

@@ -58,7 +58,7 @@ export function registerSavedSshTools(
 
   server.registerTool("ssh_host_list", {
     title: "List saved SSH devices",
-    description: "List configured SSH device aliases, addresses, usernames and whether their credentials are available in Windows Credential Manager. Does not return passwords or tokens. Only for trusted-dev workspaces.",
+    description: "List configured SSH device aliases, addresses, usernames and whether their credentials are available in the local Windows Credential Manager or macOS Keychain. Does not return passwords or tokens. Only for trusted-dev workspaces.",
     inputSchema: z.object({ workspaceId: workspaceIdSchema }).strict(),
     outputSchema: z.object({ hosts: z.array(viewSchema) }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -70,8 +70,8 @@ export function registerSavedSshTools(
   });
 
   server.registerTool("ssh_host_save", {
-    title: "Save SSH device and password on Windows",
-    description: "Register or update an SSH device alias. Opens a secure password box on the Bridge Windows desktop displaying the target account and IP. Only the person at that desktop can enter the password; the secret is stored in their Windows Credential Manager and is not returned to MCP. No SSH or host settings are changed.",
+    title: "Save SSH device and password on this computer",
+    description: "Register or update an SSH device alias. Opens a native hidden-password dialog on the Bridge desktop displaying the target account and address. The secret is stored in the local Windows Credential Manager or macOS Keychain and is not returned to MCP. No SSH or host settings are changed.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       hostId: hostIdSchema,
@@ -90,7 +90,7 @@ export function registerSavedSshTools(
 
   server.registerTool("ssh_host_remove", {
     title: "Remove saved SSH device and password",
-    description: "Delete a device alias and its password from Windows Credential Manager. Does not modify remote SSH servers.",
+    description: "Delete a device alias and its password from the local Windows Credential Manager or macOS Keychain. Does not modify remote SSH servers.",
     inputSchema: z.object({ workspaceId: workspaceIdSchema, hostId: hostIdSchema }).strict(),
     outputSchema: z.object({ removed: z.boolean() }),
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
@@ -102,8 +102,8 @@ export function registerSavedSshTools(
   });
 
   server.registerTool("ssh_start_saved", {
-    title: "SSH terminal login using local Windows credentials",
-    description: "Start an interactive Windows OpenSSH session using a configured SSH alias. The Bridge checks SSH host keys strictly and locally retrieves the saved password from Windows Credential Manager when ssh.exe displays a password prompt. Password never appears in MCP arguments or results. Use terminal_read/write/close on the returned sessionId to manage the remote shell; verify login output before sending commands.",
+    title: "SSH terminal login using local credentials",
+    description: "Start an interactive OpenSSH session using a configured SSH alias. The Bridge checks SSH host keys strictly and retrieves the saved password from the local credential vault when the SSH client displays a password prompt. Password never appears in MCP arguments or results. Use terminal_read/write/close on the returned sessionId to manage the remote shell; verify login output before sending commands.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       hostId: hostIdSchema,

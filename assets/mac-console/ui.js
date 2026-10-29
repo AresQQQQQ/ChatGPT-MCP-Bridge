@@ -10,7 +10,7 @@ if (location.hash) { sessionStorage.setItem(tokenKey, credential); history.repla
 let snapshot, selected, selectedModule, draft, editRevision, lastSelection, activeTab = "details", localBusy = false;
 let chainSignature = "", treeSignature = "", detailsSignature = "", mcpsSignature = "", globalMcpsSignature = "";
 let sourceFilter = "all", clearedThrough = "", visibleLogs = [], logSignature = "", toastTimer, expired = false;
-let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, globalMcpOpen = false, codexDefaultsOpen = false, codexDefaultsInitialized = false, lastCommandError = "";
+let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, globalMcpOpen = false, codexDefaultsOpen = false, codexDefaultsInitialized = false, sshHostsOpen = false, sshHostFormOpen = false, sshHostBusy = false, sshHostEditing = undefined, sshHosts = [], sshHostsLoaded = false, lastCommandError = "";
 
 function toast(message) { $("toast").textContent = message; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 4200); }
 async function request(route, body) {
@@ -325,10 +325,156 @@ function renderCodexDefaults() {
     ? "请先停止 Bridge，再修改默认值。"
     : busy ? "正在执行操作…" : "保存时会检查配置版本，避免覆盖其他程序的并发修改。";
 }
+function renderSshHosts() {
+  const dialog = $("ssh-hosts-dialog");
+  if (!sshHostsOpen) {
+    if (dialog.open) dialog.close();
+    return;
+  }
+  if (!dialog.open) dialog.showModal();
+  const trusted = snapshot?.workspaces?.some(workspace => workspace.mode === "trusted-dev") === true;
+  $("ssh-host-count").textContent = sshHostsLoaded ? String(sshHosts.length) : "›";
+  $("settings-ssh-summary").textContent = !trusted
+    ? "需要至少一个 trusted-dev 工作区"
+    : sshHostsLoaded ? sshHosts.length + " 个已保存主机 · 密码保存在本机 Keychain" : "密码安全保存在本机 Keychain";
+  $("ssh-host-add").disabled = !trusted || sshHostBusy;
+  $("ssh-hosts-summary").textContent = !trusted
+    ? "SSH 主机管理需要至少一个 trusted-dev 工作区。请先在项目设置中调整权限模式。"
+    : sshHostsLoaded ? sshHosts.length + " 个全局 SSH 主机 · 密码不会写入主机元数据" : "正在读取主机列表…";
+  $("ssh-host-list").hidden = sshHostFormOpen;
+  $("ssh-host-list-actions").hidden = sshHostFormOpen;
+  $("ssh-host-form").hidden = !sshHostFormOpen;
+  $("ssh-host-list").innerHTML = sshHosts.length ? sshHosts.map(host => {
+    const credential = host.credentialAvailable ? "凭据已保存" : "未检测到已保存密码";
+    const tone = host.credentialAvailable ? "good" : "warn";
+    return '<article class="ssh-host-card"><div class="ssh-host-card-heading"><div><p class="ssh-host-workspace">全局主机</p><h3>' + escape(host.hostId) + '</h3></div><span class="badge ' + tone + '">' + credential + '</span></div><p class="ssh-host-address">' + escape(host.username) + '@' + escape(host.host) + ':' + escape(host.port) + '</p><div class="ssh-host-meta"><span>SSH</span><span>端口 ' + escape(host.port) + '</span></div><div class="ssh-host-card-actions"><button type="button" data-ssh-edit="' + escape(host.hostId) + '">编辑</button><button type="button" class="danger" data-ssh-delete="' + escape(host.hostId) + '">删除</button></div></article>';
+  }).join("") : '<div class="empty-state"><span aria-hidden="true">⌁</span><h3>尚未保存 SSH 主机</h3><p>添加常用主机后，SSH MCP 工具可以使用别名发起交互式连接。</p></div>';
+  $("ssh-host-list").querySelectorAll("[data-ssh-edit]").forEach(button => {
+    button.disabled = sshHostBusy || !trusted;
+    button.addEventListener("click", () => {
+      const host = sshHosts.find(item => item.hostId === button.dataset.sshEdit);
+      if (host) openSshHostForm(host);
+    });
+  });
+  $("ssh-host-list").querySelectorAll("[data-ssh-delete]").forEach(button => {
+    button.disabled = sshHostBusy || !trusted;
+    button.addEventListener("click", async () => {
+      const host = sshHosts.find(item => item.hostId === button.dataset.sshDelete);
+      if (!host || !(await confirmAction("删除 SSH 主机？", "将删除 " + host.hostId + " 的本地主机记录及对应 Keychain 密码，不会修改远程服务器。"))) return;
+      sshHostBusy = true;
+      renderSshHosts();
+      try {
+        await request("/api/ssh/remove", {hostId:host.hostId});
+        toast("SSH 主机及本地凭据已删除");
+        await loadSshHosts();
+      } catch (error) {
+        $("ssh-hosts-error").hidden = false;
+        $("ssh-hosts-error").textContent = error.message;
+      } finally {
+        sshHostBusy = false;
+        renderSshHosts();
+      }
+    });
+  });
+}
+async function loadSshHosts() {
+  const result = await request("/api/ssh/hosts");
+  sshHosts = Array.isArray(result.hosts) ? result.hosts : [];
+  sshHostsLoaded = true;
+  $("ssh-hosts-error").hidden = true;
+  renderSshHosts();
+}
+async function openSshHosts() {
+  sshHostsOpen = true;
+  sshHostFormOpen = false;
+  sshHostEditing = undefined;
+  $("ssh-host-password").value = "";
+  $("ssh-hosts-error").hidden = true;
+  renderSshHosts();
+  const trusted = snapshot?.workspaces?.some(workspace => workspace.mode === "trusted-dev") === true;
+  if (!trusted) return;
+  $("ssh-hosts-summary").textContent = "正在读取主机列表…";
+  try { await loadSshHosts(); }
+  catch (error) {
+    $("ssh-hosts-error").hidden = false;
+    $("ssh-hosts-error").textContent = error.message;
+    $("ssh-hosts-summary").textContent = "无法读取 SSH 主机列表";
+  }
+}
+function closeSshHosts() {
+  sshHostsOpen = false;
+  sshHostFormOpen = false;
+  sshHostEditing = undefined;
+  $("ssh-host-password").value = "";
+  renderSshHosts();
+}
+function openSshHostForm(host) {
+  sshHostEditing = host;
+  sshHostFormOpen = true;
+  $("ssh-host-form-title").textContent = host ? "编辑 SSH 主机" : "添加 SSH 主机";
+  $("ssh-host-id").value = host?.hostId || "";
+  $("ssh-host-address").value = host?.host || "";
+  $("ssh-host-username").value = host?.username || "";
+  $("ssh-host-port").value = String(host?.port || 22);
+  $("ssh-host-password").value = "";
+  $("ssh-host-password").required = !host || !host.credentialAvailable;
+  $("ssh-host-password").placeholder = host?.credentialAvailable ? "留空以保留当前密码" : "请输入要保存的 SSH 密码";
+  $("ssh-host-form-hint").textContent = host?.credentialAvailable
+    ? "密码已保存在本机 Keychain。留空将保留现有密码；输入新密码则替换。"
+    : "尚未检测到已保存密码，必须输入密码。密码不会写入主机元数据或日志。";
+  $("ssh-host-form-error").hidden = true;
+  renderSshHosts();
+  $("ssh-host-id").focus();
+}
+async function saveSshHost(event) {
+  event.preventDefault();
+  if (sshHostBusy) return;
+  const hostId = $("ssh-host-id").value.trim();
+  const host = $("ssh-host-address").value.trim();
+  const username = $("ssh-host-username").value.trim();
+  const port = Number($("ssh-host-port").value);
+  const password = $("ssh-host-password").value;
+  if (!hostId || !host || !username || !Number.isInteger(port) || port < 1 || port > 65535) {
+    $("ssh-host-form-error").hidden = false;
+    $("ssh-host-form-error").textContent = "请完整填写别名、地址、用户名和有效端口。";
+    return;
+  }
+  if ((!sshHostEditing || !sshHostEditing.credentialAvailable) && !password) {
+    $("ssh-host-form-error").hidden = false;
+    $("ssh-host-form-error").textContent = "请填写 SSH 密码。";
+    return;
+  }
+  const payload = {hostId, host, username, port};
+  if (sshHostEditing) payload.previousHostId = sshHostEditing.hostId;
+  if (password) payload.password = password;
+  sshHostBusy = true;
+  $("ssh-host-form-error").hidden = true;
+  for (const id of ["ssh-host-id", "ssh-host-address", "ssh-host-username", "ssh-host-port", "ssh-host-password", "ssh-host-form-save"]) $(id).disabled = true;
+  try {
+    await request("/api/ssh/save", payload);
+    $("ssh-host-password").value = "";
+    sshHostFormOpen = false;
+    sshHostEditing = undefined;
+    toast("SSH 主机已保存到本机");
+    try { await loadSshHosts(); }
+    catch (error) {
+      $("ssh-hosts-error").hidden = false;
+      $("ssh-hosts-error").textContent = "主机已保存，但列表刷新失败：" + error.message;
+    }
+  } catch (error) {
+    $("ssh-host-form-error").hidden = false;
+    $("ssh-host-form-error").textContent = error.message;
+  } finally {
+    sshHostBusy = false;
+    for (const id of ["ssh-host-id", "ssh-host-address", "ssh-host-username", "ssh-host-port", "ssh-host-password", "ssh-host-form-save"]) $(id).disabled = false;
+    renderSshHosts();
+  }
+}
 async function refresh() {
   snapshot=await request("/api/snapshot");
   if(!currentWorkspaces().some(w=>w.id===selected)){selected=currentWorkspaces()[0]?.id;selectedModule=undefined;}
   $("settings-codex-summary").textContent = (snapshot.codexDefaults?.defaultModel || "未设置") + " · " + (snapshot.codexDefaults?.defaultEffort || "未设置");
+  if (!sshHostsLoaded) $("settings-ssh-summary").textContent = snapshot.workspaces.some(workspace => workspace.mode === "trusted-dev") ? "密码安全保存在本机 Keychain" : "需要至少一个 trusted-dev 工作区";
   renderConnectionSetup();renderApiPortSettings();renderCodexDefaults();renderChain();renderTree();renderInspector();renderGlobalMcps();renderLogs();updateButtons();
 }
 async function poll() {
@@ -361,6 +507,26 @@ $("settings-edit-codex-defaults").addEventListener("click", () => {
   renderCodexDefaults();
   $("codex-default-model").focus();
 });
+$("settings-open-ssh-hosts").addEventListener("click", () => {
+  closeSettingsMenu();
+  void openSshHosts();
+});
+$("ssh-hosts-close").addEventListener("click", closeSshHosts);
+$("ssh-hosts-dialog").addEventListener("cancel", closeSshHosts);
+$("ssh-hosts-dialog").addEventListener("close", () => {
+  sshHostsOpen = false;
+  sshHostFormOpen = false;
+  sshHostEditing = undefined;
+  $("ssh-host-password").value = "";
+});
+$("ssh-host-add").addEventListener("click", () => openSshHostForm(undefined));
+$("ssh-host-form-cancel").addEventListener("click", () => {
+  sshHostFormOpen = false;
+  sshHostEditing = undefined;
+  $("ssh-host-password").value = "";
+  renderSshHosts();
+});
+$("ssh-host-form").addEventListener("submit", event => { void saveSshHost(event); });
 $("codex-defaults-close").addEventListener("click", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; renderCodexDefaults(); });
 $("codex-defaults-cancel").addEventListener("click", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; renderCodexDefaults(); });
 $("codex-defaults-dialog").addEventListener("cancel", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; });

@@ -1,5 +1,18 @@
 import { execFile } from "node:child_process";
 
+const MAC_PASSWORD_UI_SCRIPT = [
+  "on run argv",
+  "  try",
+  "    set promptLabel to item 1 of argv",
+  "    set dialogResult to display dialog promptLabel default answer \"\" with hidden answer buttons {\"取消\", \"保存\"} default button \"保存\" cancel button \"取消\" with title \"ChatGPT MCP Bridge\"",
+  "    return \"MCP_BRIDGE_PASSWORD_OK:\" & (text returned of dialogResult)",
+  "  on error errMsg number errNum",
+  "    if errNum is -128 then return \"MCP_BRIDGE_PASSWORD_CANCELLED\"",
+  "    error errMsg number errNum",
+  "  end try",
+  "end run",
+].join("\n");
+
 export const PASSWORD_UI_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "Add-Type -AssemblyName PresentationFramework",
@@ -60,8 +73,30 @@ export const PASSWORD_UI_SCRIPT = [
  * Cancellation returns null. The caller must not return the password to MCP.
  */
 export async function promptForLocalPassword(label: string): Promise<string | null> {
+  if (process.platform === "darwin") {
+    return new Promise((resolve, reject) => {
+      execFile(
+        "/usr/bin/osascript",
+        ["-e", MAC_PASSWORD_UI_SCRIPT, label.slice(0, 250)],
+        { encoding: "utf8", timeout: 90_000, maxBuffer: 8192 },
+        (error, stdout) => {
+          if (error) {
+            reject(new Error("Local SSH password dialog was not completed; check the macOS desktop session"));
+            return;
+          }
+          const output = stdout.endsWith("\\r\\n") ? stdout.slice(0, -2) : stdout.endsWith("\\n") ? stdout.slice(0, -1) : stdout;
+          if (output === "MCP_BRIDGE_PASSWORD_CANCELLED") { resolve(null); return; }
+          if (!output.startsWith("MCP_BRIDGE_PASSWORD_OK:")) {
+            reject(new Error("Local SSH password dialog returned an invalid response"));
+            return;
+          }
+          resolve(output.slice("MCP_BRIDGE_PASSWORD_OK:".length));
+        },
+      );
+    });
+  }
   if (process.platform !== "win32") {
-    throw new Error("Local password prompt requires an interactive Windows desktop");
+    throw new Error("Local SSH password prompt requires an interactive Windows or macOS desktop");
   }
   const encodedCommand = Buffer.from(PASSWORD_UI_SCRIPT, "utf16le").toString("base64");
   return new Promise((resolve, reject) => {

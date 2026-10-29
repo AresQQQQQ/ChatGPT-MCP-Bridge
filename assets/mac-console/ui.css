@@ -95,6 +95,22 @@
 .toolbar #global-mcp-count{display:inline-block;margin-left:5px;padding:1px 6px;border:1px solid var(--border);border-radius:9px;background:var(--sidebar);font-size:10px;font-variant-numeric:tabular-nums}
 .global-mcp-dialog{width:min(760px,calc(100vw - 32px))}
 .codex-defaults-dialog{width:min(560px,calc(100vw - 32px))}
+.ssh-hosts-dialog{width:min(760px,calc(100vw - 32px))}
+.ssh-hosts-dialog .setup-panel{padding:20px}
+.ssh-host-list{display:grid;gap:10px;max-height:min(48vh,420px);overflow:auto;margin:12px 0}
+.ssh-host-card{border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--surface)}
+.ssh-host-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.ssh-host-card-heading h3{font-size:13px;margin:2px 0 0}
+.ssh-host-address{font-family:SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:8px 0}
+.ssh-host-meta{font-size:11px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.ssh-host-card-actions{display:flex;gap:7px;margin-top:10px}
+.ssh-host-card-actions button{font-size:11px;padding:5px 10px}
+.ssh-host-form{border-top:1px solid var(--border);padding-top:15px;margin-top:15px}
+.ssh-host-form[hidden]{display:none!important}
+.ssh-host-form h3{font-size:13px;margin:0 0 13px}
+.ssh-host-form .setup-form-grid label:first-child{grid-column:auto}
+.ssh-host-form .ssh-password-field{grid-column:1 / -1!important}
+@media(max-width:700px){.ssh-hosts-dialog .setup-panel{padding:15px}.ssh-host-card-heading{align-items:flex-start}.ssh-host-card-actions{flex-wrap:wrap}}
 .global-mcp-dialog .setup-panel{padding:20px}
 .global-mcp-list{display:grid;gap:10px;max-height:min(62vh,560px);overflow:auto;padding-right:2px}
 .global-mcp-card{border:1px solid var(--border);border-radius:8px;padding:13px;background:var(--surface)}

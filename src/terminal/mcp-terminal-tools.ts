@@ -50,8 +50,8 @@ export function registerTerminalTools(
   };
 
   server.registerTool("terminal_start", {
-    title: "Start interactive Windows terminal",
-    description: "Start a long-lived PTY process in a trusted-dev workspace. For SSH use executable ssh.exe and normal argv. The session survives individual MCP requests. Passwords must not be placed in args; use terminal_local_password for SSH password prompts.",
+    title: "Start interactive terminal",
+    description: "Start a long-lived PTY process in a trusted-dev workspace. For SSH use the platform client (ssh.exe on Windows or /usr/bin/ssh on macOS) and normal argv. The session survives individual MCP requests. Passwords must not be placed in args; use terminal_local_password for SSH password prompts.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       executable: z.string().min(1).max(4096),
@@ -124,8 +124,8 @@ export function registerTerminalTools(
   });
 
   server.registerTool("terminal_local_password", {
-    title: "Enter SSH password locally on Windows",
-    description: "Only for a running ssh.exe PTY displaying a recent password/passphrase prompt. Opens a PasswordBox window on the Windows Bridge desktop. The user types locally: the secret is written directly to the SSH process, never returned to MCP or logged. Works only with an interactive Windows desktop.",
+    title: "Enter SSH password locally",
+    description: "Only for a running native SSH PTY displaying a recent password/passphrase prompt. Opens a local hidden-password dialog on the Bridge desktop. The user types locally: the secret is written directly to the SSH process, never returned to MCP or logged. Requires an interactive Windows or macOS desktop.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       sessionId: sessionIdSchema,

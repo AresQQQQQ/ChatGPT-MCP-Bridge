@@ -64,7 +64,12 @@ test("macOS main console embeds the same connection setup fields and posts to it
   assert.ok(html.includes('id="settings-open-api-ports"'));
   assert.ok(html.includes('id="api-port-dialog"'));
   assert.ok(html.includes('id="settings-menu"'));
-  assert.ok(html.includes("macOS Keychain 凭据管理尚未实现"));
+  assert.ok(html.includes("id=\"settings-open-ssh-hosts\""));
+  assert.ok(html.includes("id=\"ssh-hosts-dialog\""));
+  assert.ok(html.includes("密码只存入 macOS Keychain"));
+  assert.ok(js.includes('request("/api/ssh/hosts")'));
+  assert.ok(server.includes('app.post("/api/ssh/save"'));
+  assert.ok(server.includes('app.post("/api/ssh/remove"'));
   assert.ok(!html.includes('id="settings-open-connection"'));
   assert.ok(js.includes('command("connection-setup"'));
   assert.ok(js.includes('command("save-api-port-settings"'));

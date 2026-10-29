@@ -143,7 +143,7 @@ Windows 与 macOS 都从 GitHub main 更新。先停止本机 Bridge/Tunnel；�
 脚本仅接受 main 分支和干净的源码工作树，执行 git fetch、检查本地/远端提交关系，并只允许 fast-forward 到 origin/main。依赖清单变更时执行 pnpm install --frozen-lockfile，随后构建并运行 doctor。诊断通过后，只启动当前电脑本机配置中的 Bridge 与 Tunnel。私有配置、密钥、状态目录和 Tunnel profile 不参与源码同步。更新失败时保留错误输出，不会强制重置本地分支。
 
 GitHub Actions 在 Windows 与 Apple Silicon macOS runner 上分别运行安装、typecheck、完整测试和构建；macOS job 还会编译原生 AppKit/WebKit 控制台。
-Windows Credential Manager 与保存密码的交互式 SSH 登录仍为 Windows 专属能力；macOS 尚未实现 Keychain 适配，相关 SSH 凭据操作会明确报告不支持，不会把该功能描述为跨平台可用。
+保存的 SSH 主机现支持 Windows Credential Manager 与 macOS Keychain；两端均可通过本机 UI 管理全局主机，SSH 密码不会写入配置文件或返回给 MCP。macOS 首次使用 Keychain 时会在本机编译安全 helper，并可能触发系统 Keychain 授权提示。
 ## 连接 ChatGPT
 
 本地向导保存 Tunnel ID 和 Runtime API key **不会自动在 ChatGPT 创建插件**。本机 Bridge 与 Tunnel 启动并就绪后，还需完成以下步骤：

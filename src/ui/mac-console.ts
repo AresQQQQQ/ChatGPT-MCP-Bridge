@@ -9,6 +9,8 @@ import express from "express";
 import { z } from "zod";
 
 import { BridgeController } from "../control/bridge-controller.js";
+import { isTrustedDevMode } from "../config.js";
+import { SavedSshHostError, SavedSshHostManager, type GlobalUiSaveSshHostRequest } from "../terminal/saved-ssh-hosts.js";
 import { readWorkspaceConfig, writeWorkspaceConfig } from "./workspace-config.js";
 import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, saveConnectionSettings, connectionSettingsInputSchema, connectionSetupInputSchema, type ConnectionSetupProgress } from "./connection-setup.js";
 
@@ -16,6 +18,9 @@ const exec = promisify(execFile);
 const ASSET_ROOT = fileURLToPath(new URL("../../assets/", import.meta.url));
 const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/u).max(128);
 const workspace = z.object({ originalId: id.optional(), id, root: z.string().min(1).max(4096), mode: z.enum(["readonly", "workspace", "trusted-dev", "handoff"]) }).strict();
+const sshAlias = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u);
+const sshSaveSchema = z.object({ hostId: sshAlias, previousHostId: sshAlias.optional(), host: z.string().min(1).max(253), username: z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/u), port: z.number().int().min(1).max(65535), password: z.string().min(1).max(1200).optional() }).strict();
+const sshRemoveSchema = z.object({ hostId: sshAlias }).strict();
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.enum(["start", "stop", "restart", "close"]) }).strict(),
   z.object({ action: z.literal("connection-setup"), input: connectionSetupInputSchema }).strict(),
@@ -31,6 +36,7 @@ type Controller = Pick<BridgeController, "lifecycleState" | "start" | "stop" | "
 export interface MacControlUiOptions {
   readonly openBrowser?: boolean;
   readonly controller?: Controller;
+  readonly sshHosts?: Pick<SavedSshHostManager, "listGlobal" | "saveGlobalFromUi" | "removeGlobal">;
   readonly launchBrowser?: (url: string) => Promise<void>;
 }
 export interface MacControlUi { readonly url: string; close(): Promise<void> }
@@ -47,9 +53,11 @@ export async function launchMacControlUi(configPath: string, options: MacControl
   // Validate the bootstrapped or existing config before opening the console.
   await readWorkspaceConfig(configPath);
   const controller = options.controller ?? new BridgeController({ configPath, captureTunnelOutput: true });
+  const sshHosts = options.sshHosts ?? new SavedSshHostManager(path.join(path.dirname(configPath), ".mcp-bridge-state", "ssh-hosts.json"));
   const credential = randomBytes(32).toString("hex");
   const secrets = new Set<string>([credential]);
   let operation: Promise<void> | undefined;
+  let sshHostOperation: Promise<void> | undefined;
   let connectionSetupState: ConnectionSetupProgress = { running: false, success: false, progress: "等待配置", error: "" };
   let closing: Promise<void> | undefined;
   let closed = false;
@@ -98,8 +106,9 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     if (closing) return closing;
     closed = true;
     closing = (async () => {
-      // Finish the current start/save before stopping, so a late completion cannot orphan services.
+      // Finish in-flight controller and credential operations before closing their local API.
       if (operation) await operation.catch(() => undefined);
+      if (sshHostOperation) await sshHostOperation.catch(() => undefined);
       try { await controller.stop(); }
       finally {
         await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -145,6 +154,56 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     // Tunnel ID is a non-secret identifier needed by the local settings UI; keep log redaction intact.
     res.json({ ...snapshot, connectionSetup: { ...snapshot.connectionSetup, tunnelId: connectionSetup.tunnelId } });
   });
+  const requireSshManagementEnabled = async (): Promise<void> => {
+    const config = await readWorkspaceConfig(configPath);
+    if (!config.workspaces.some(item => isTrustedDevMode(item.mode))) {
+      throw new SavedSshHostError("SSH 主机管理要求至少有一个 trusted-dev 工作区。");
+    }
+  };
+  const sendSshError = (error: unknown, res: express.Response): void => {
+    if (res.headersSent) return;
+    if (error instanceof SavedSshHostError) {
+      res.status(400).json({ error: redact(error.message) });
+      return;
+    }
+    res.status(500).json({ error: "SSH 主机操作失败；请检查本机 Keychain 和主机配置。" });
+  };
+
+  app.get("/api/ssh/hosts", async (_req, res) => {
+    try {
+      await requireSshManagementEnabled();
+      res.json({ hosts: await sshHosts.listGlobal() });
+    } catch (error) { sendSshError(error, res); }
+  });
+  app.post("/api/ssh/save", async (req, res) => {
+    const parsed = sshSaveSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: "请检查 SSH 主机别名、地址、用户名、端口和密码。" }); return; }
+    if (sshHostOperation) { res.status(409).json({ error: "正在保存另一项 SSH 主机更改，请稍后重试。" }); return; }
+    const task = (async () => {
+      await requireSshManagementEnabled();
+      return sshHosts.saveGlobalFromUi(parsed.data as GlobalUiSaveSshHostRequest);
+    })();
+    sshHostOperation = task.then(() => undefined, () => undefined);
+    try {
+      const host = await task;
+      res.json({ host, saved: true });
+    } catch (error) { sendSshError(error, res); }
+    finally { sshHostOperation = undefined; }
+  });
+  app.post("/api/ssh/remove", async (req, res) => {
+    const parsed = sshRemoveSchema.safeParse(req.body);
+    if (!parsed.success) { res.status(400).json({ error: "SSH 主机别名无效。" }); return; }
+    if (sshHostOperation) { res.status(409).json({ error: "正在保存另一项 SSH 主机更改，请稍后重试。" }); return; }
+    const task = (async () => {
+      await requireSshManagementEnabled();
+      return sshHosts.removeGlobal(parsed.data.hostId);
+    })();
+    sshHostOperation = task.then(() => undefined, () => undefined);
+    try { res.json(await task); }
+    catch (error) { sendSshError(error, res); }
+    finally { sshHostOperation = undefined; }
+  });
+
   app.post("/api/action", async (req, res) => {
     const parsed = actionSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: "控制请求参数无效" }); return; }

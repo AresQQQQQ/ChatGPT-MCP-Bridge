@@ -16,7 +16,8 @@
     "README.md",
     "LICENSE",
     "assets/mac-console",
-    "assets/setup-wizard"
+    "assets/setup-wizard",
+    "src/terminal/mac-keychain-helper.swift"
   ],
   "scripts": {
     "setup": "node tools/run-setup.mjs",
