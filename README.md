@@ -39,10 +39,9 @@ Windows 用户请使用 PowerShell 或 Windows Terminal；Mac 用户请使用 Te
 git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
 cd ChatGPT-MCP-Bridge
 pnpm install --frozen-lockfile
-pnpm build
 ```
 
-这些命令在 Windows PowerShell 和 macOS Terminal 中都可使用。
+这些命令在 Windows PowerShell 和 macOS Terminal 中都可使用。安装依赖后，按下一步启动桌面 UI；Mac 启动入口会自动完成所需构建，Windows 桌面 UI 直接从源码启动。
 
 ### 第 3 步：启动桌面 UI，并在 UI 中配置 Tunnel
 
