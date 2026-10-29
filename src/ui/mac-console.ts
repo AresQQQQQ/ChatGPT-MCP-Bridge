@@ -10,7 +10,7 @@ import { z } from "zod";
 
 import { BridgeController } from "../control/bridge-controller.js";
 import { readWorkspaceConfig, writeWorkspaceConfig } from "./workspace-config.js";
-import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, connectionSetupInputSchema, type ConnectionSetupProgress } from "./connection-setup.js";
+import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, saveConnectionSettings, connectionSettingsInputSchema, connectionSetupInputSchema, type ConnectionSetupProgress } from "./connection-setup.js";
 
 const exec = promisify(execFile);
 const ASSET_ROOT = fileURLToPath(new URL("../../assets/", import.meta.url));
@@ -19,6 +19,7 @@ const workspace = z.object({ originalId: id.optional(), id, root: z.string().min
 const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.enum(["start", "stop", "restart", "close"]) }).strict(),
   z.object({ action: z.literal("connection-setup"), input: connectionSetupInputSchema }).strict(),
+  z.object({ action: z.literal("save-api-port-settings"), input: connectionSettingsInputSchema }).strict(),
   z.object({ action: z.literal("save-config"), revision: z.string().regex(/^[a-f0-9]{64}$/u), workspaces: z.array(workspace).min(1).max(100) }).strict(),
   z.object({ action: z.literal("refresh-codex"), workspaceId: id }).strict(),
   z.object({ action: z.literal("unbind-codex"), workspaceId: id, moduleId: id }).strict(),
@@ -152,6 +153,7 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     }
     if (operation) { res.status(409).json({ error: "正在执行操作，请稍后重试" }); return; }
     if (input.action === "connection-setup" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再配置连接。" }); return; }
+    if (input.action === "save-api-port-settings" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再保存 API / 端口设置。" }); return; }
     if (input.action === "save-config" && controller.lifecycleState !== "stopped") {
       res.status(409).json({ error: "请先停止 Bridge 再保存配置" }); return;
     }
@@ -171,6 +173,22 @@ export async function launchMacControlUi(configPath: string, options: MacControl
         } catch (error) {
           const message = redact(error instanceof Error ? error.message : "连接配置失败。");
           connectionSetupState = { running: false, success: false, progress: "连接配置未完成", error: message };
+          throw new Error(message);
+        } finally {
+          if (runtimeKey && !persisted) secrets.delete(runtimeKey);
+        }
+      } else if (input.action === "save-api-port-settings") {
+        const runtimeKey = input.input.runtimeKey?.trim() ?? "";
+        let persisted = false;
+        if (runtimeKey) secrets.add(runtimeKey);
+        try {
+          await saveConnectionSettings(configPath, input.input);
+          persisted = true;
+          await refreshSecrets(await readFile(configPath, "utf8"));
+          connectionSetupState = { running: false, success: false, progress: "API / 端口设置已保存", error: "" };
+        } catch (error) {
+          const message = redact(error instanceof Error ? error.message : "保存 API / 端口设置失败。");
+          connectionSetupState = { running: false, success: false, progress: "API / 端口设置未完成", error: message };
           throw new Error(message);
         } finally {
           if (runtimeKey && !persisted) secrets.delete(runtimeKey);

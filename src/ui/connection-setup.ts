@@ -1,10 +1,11 @@
-import { open, mkdir, readFile, stat } from "node:fs/promises";
+import { open, mkdir, readFile, stat, writeFile, rename, rm, chmod } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { parseEnv } from "node:util";
 import { z } from "zod";
 import { configFileTemplate, loadConfig, type BridgeConfig } from "../config.js";
-import { setupTunnel, type SetupDependencies, type SetupInput } from "../setup/tunnel-setup.js";
+import { setupTunnel, updateRuntimeKey, type SetupDependencies, type SetupInput } from "../setup/tunnel-setup.js";
 
 export const connectionSetupInputSchema = z.object({
   tunnelId: z.string().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).max(135),
@@ -15,6 +16,13 @@ export const connectionSetupInputSchema = z.object({
 }).strict();
 
 export type ConnectionSetupInput = z.infer<typeof connectionSetupInputSchema>;
+
+export const connectionSettingsInputSchema = z.object({
+  runtimeKey: z.string().max(4096).optional(),
+  bridgePort: z.number().int().min(1).max(65535),
+  healthPort: z.number().int().min(1024).max(65535),
+}).strict();
+export type ConnectionSettingsInput = z.infer<typeof connectionSettingsInputSchema>;
 
 export interface ConnectionSetupProgress {
   readonly running: boolean;
@@ -29,6 +37,7 @@ export interface ConnectionSetupStatus extends ConnectionSetupProgress {
   readonly hasBridgeAuth: boolean;
   readonly hasRuntimeKey: boolean;
   readonly tunnelConfigured: boolean;
+  readonly tunnelId: string;
   readonly tunnelClientAvailable: boolean;
   readonly tunnelProfileAvailable: boolean;
   readonly defaultHealthPort: number;
@@ -125,9 +134,10 @@ export async function readConnectionSetupStatus(
     hasBridgeAuth,
     hasRuntimeKey,
     tunnelConfigured,
+    tunnelId: config?.tunnel?.tunnelId ?? "",
     tunnelClientAvailable,
     tunnelProfileAvailable,
-    defaultHealthPort: portFromHealthUrl(config?.tunnel?.healthUrl),
+    defaultHealthPort: config?.tunnel?.healthUrl ? portFromHealthUrl(config.tunnel.healthUrl) : config?.tunnelHealthPort ?? 8080,
     reuseClientDefault: tunnelConfigured && tunnelClientAvailable,
     bridgePort: config?.port ?? 3000,
     ready,
@@ -181,6 +191,92 @@ async function assertPortAvailable(port: number): Promise<void> {
   }
 }
 
+
+async function persistApiPortSettings(
+  configPath: string,
+  originalConfig: string | undefined,
+  nextConfig: string,
+  envPath: string,
+  oldEnv: string | undefined,
+  nextEnv: string,
+): Promise<void> {
+  const nonce = String(process.pid) + "." + randomUUID();
+  const configTemp = configPath + ".settings." + nonce + ".tmp";
+  const envTemp = envPath + ".settings." + nonce + ".tmp";
+  try {
+    await writeFile(configTemp, nextConfig, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await writeFile(envTemp, nextEnv, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    if (await readOptional(configPath) !== originalConfig || await readOptional(envPath) !== oldEnv) {
+      throw new Error("配置在保存期间被修改，请刷新设置后重试；原配置未覆盖。");
+    }
+    await rename(envTemp, envPath);
+    try { await rename(configTemp, configPath); }
+    catch (error) {
+      const currentEnv = await readOptional(envPath);
+      if (currentEnv === nextEnv) {
+        if (oldEnv === undefined) await rm(envPath, { force: true });
+        else await writeFile(envPath, oldEnv, { encoding: "utf8", mode: 0o600 });
+      }
+      // Never delete a config file that may have appeared concurrently.
+      throw error;
+    }
+    await chmod(configPath, 0o600).catch(() => undefined);
+    await chmod(envPath, 0o600).catch(() => undefined);
+  } finally {
+    await rm(configTemp, { force: true }).catch(() => undefined);
+    await rm(envTemp, { force: true }).catch(() => undefined);
+  }
+}
+
+export async function saveConnectionSettings(configPath: string, value: unknown): Promise<void> {
+  const parsed = connectionSettingsInputSchema.safeParse(value);
+  if (!parsed.success) throw new Error("请检查 Runtime API key、Bridge 端口和健康检查端口。");
+  const input = parsed.data;
+  const absolute = path.resolve(configPath);
+  const originalConfig = await readOptional(absolute);
+  const existing = await assertBridgeStopped(absolute);
+  const bridgePort = input.bridgePort;
+  const healthPort = input.healthPort;
+  if (bridgePort === healthPort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
+  await assertPortAvailable(bridgePort);
+  const envPath = path.join(path.dirname(absolute), ".env");
+  const oldEnv = await readOptional(envPath);
+  const oldKey = parseEnv(oldEnv ?? "").CONTROL_PLANE_API_KEY;
+  const suppliedKey = input.runtimeKey?.trim() ?? "";
+  const nextKey = suppliedKey || oldKey || "";
+  if (!nextKey) throw new Error("请填写 Runtime API key，或使用连接向导完成首次配置。");
+  const nextEnv = updateRuntimeKey(oldEnv ?? "", nextKey);
+  const tunnel = existing?.tunnel;
+  const oldHealthPort = portFromHealthUrl(tunnel?.healthUrl);
+  const portsChanged = bridgePort !== (existing?.port ?? 3000) || (Boolean(tunnel) && healthPort !== oldHealthPort);
+  if (!tunnel || healthPort !== oldHealthPort) await assertPortAvailable(healthPort);
+  if (tunnel && portsChanged) {
+    if (!tunnel.tunnelId) {
+      throw new Error("当前 Tunnel profile 尚未保存 Tunnel ID。请先通过主界面的连接向导重新初始化一次；之后即可在设置中修改端口。");
+    }
+    await setupTunnel({
+      configPath: absolute,
+      tunnelId: tunnel.tunnelId,
+      ...(suppliedKey ? { runtimeKey: suppliedKey } : {}),
+      healthPort,
+      bridgePort,
+      reuseClient: true,
+    });
+    return;
+  }
+  const raw = JSON.parse(originalConfig ?? configFileTemplate()) as Record<string, unknown>;
+  raw.port = bridgePort;
+  raw.tunnelHealthPort = healthPort;
+  await persistApiPortSettings(
+    absolute,
+    originalConfig,
+    JSON.stringify(raw, null, 2) + "\n",
+    envPath,
+    oldEnv,
+    nextEnv,
+  );
+}
+
 export async function runConnectionSetup(
   configPath: string,
   value: unknown,
@@ -198,6 +294,7 @@ export async function runConnectionSetup(
   const bridgePort = input.bridgePort ?? existingConfig?.port ?? 3000;
   if (bridgePort === input.healthPort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
   await assertPortAvailable(bridgePort);
+  await assertPortAvailable(input.healthPort);
 
   const setupInput: SetupInput = {
     configPath: path.resolve(configPath),

@@ -74,7 +74,7 @@ test("SSH aliases persist across Bridge restarts without storing plaintext passw
   try {
     const saved = await manager.save({ workspaceId: "HomeOps-AI", hostId: "pve", host: "192.168.2.31", port: 22, username: "root" });
     assert.equal(saved.saved, true);
-    assert.equal(vault.entries.get("MCPBridge/SSH/HomeOps-AI/pve"), "not-in-metadata");
+    assert.equal(vault.entries.get("MCPBridge/SSH/global/pve"), "not-in-metadata");
     const raw = await readFile(metadataPath, "utf8");
     assert.doesNotMatch(raw, /not-in-metadata/u);
     assert.match(raw, /192\.168\.2\.31/u);
@@ -85,12 +85,15 @@ test("SSH aliases persist across Bridge restarts without storing plaintext passw
       workspaceId: "HomeOps-AI", hostId: "pve", host: "192.168.2.31",
       port: 22, username: "root", credentialAvailable: true,
     });
-    assert.deepEqual(await restarted.list("other"), []);
+    assert.deepEqual(await restarted.list("other"), [{
+      workspaceId: "other", hostId: "pve", host: "192.168.2.31",
+      port: 22, username: "root", credentialAvailable: true,
+    }]);
     await assert.rejects(restarted.save({
       workspaceId: "HomeOps-AI", hostId: "bad", host: "-ProxyCommand=bad", port: 22, username: "root",
     }), /SSH address/u);
     assert.deepEqual(await restarted.remove("HomeOps-AI", "pve"), { removed: true });
-    assert.equal(await vault.exists("MCPBridge/SSH/HomeOps-AI/pve"), false);
+    assert.equal(await vault.exists("MCPBridge/SSH/global/pve"), false);
     assert.deepEqual(await restarted.list("HomeOps-AI"), []);
   } finally {
     await rm(dir, { force: true, recursive: true });
@@ -110,18 +113,17 @@ test("saved SSH connects through native ssh.exe and injects the secret only into
   });
   try {
     await saved.save({ workspaceId: "HomeOps-AI", hostId: "pve", host: "192.168.2.31", port: 22, username: "root" });
-    await assert.rejects(saved.connect("another", dir, "pve", terminals), /not configured/u);
-    const session = await saved.connect("HomeOps-AI", dir, "pve", terminals);
+    const session = await saved.connect("another", dir, "pve", terminals);
     assert.equal(session.executable, "ssh.exe");
     assert.equal(launch.executable, "ssh.exe");
     assert.ok(launch.args.includes("StrictHostKeyChecking=yes"));
     assert.ok(launch.args.includes("root@192.168.2.31"));
     assert.ok(launch.args.every((arg) => !arg.includes("secret-for-test")));
     assert.deepEqual(pty.writes, ["secret-for-test\r"]);
-    const output = await terminals.read("HomeOps-AI", session.sessionId);
+    const output = await terminals.read("another", session.sessionId);
     assert.match(output.output, /password:/u);
     assert.equal(output.output.includes("secret-for-test"), false);
-    terminals.closeSession("HomeOps-AI", session.sessionId);
+    terminals.closeSession("another", session.sessionId);
   } finally {
     terminals.close();
     await rm(dir, { force: true, recursive: true });

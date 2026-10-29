@@ -10,7 +10,7 @@ if (location.hash) { sessionStorage.setItem(tokenKey, credential); history.repla
 let snapshot, selected, selectedModule, draft, editRevision, lastSelection, activeTab = "details", localBusy = false;
 let chainSignature = "", treeSignature = "", detailsSignature = "", mcpsSignature = "";
 let sourceFilter = "all", clearedThrough = "", visibleLogs = [], logSignature = "", toastTimer, expired = false;
-let setupOpen = false, setupInitialized = false, lastSetupSuccess = false;
+let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, lastCommandError = "";
 
 function toast(message) { $("toast").textContent = message; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 4200); }
 async function request(route, body) {
@@ -22,7 +22,8 @@ async function request(route, body) {
 async function command(action, extra = {}) {
   if (localBusy || snapshot?.busy) return;
   const state = snapshot?.status.state;
-  if (action === "start" && snapshot?.connectionSetup?.ready === false) { toast("连接配置尚未完成，请先打开连接向导。"); setupOpen = true; renderConnectionSetup(); return; }
+  if (action === "start" && snapshot?.connectionSetup?.ready === false) { toast("连接配置尚未完成，请先打开连接向导。"); setupOpen = true; renderConnectionSetup(); return false; }
+  if (action === "save-api-port-settings" && state !== "stopped") { toast("请先停止 Bridge，再保存 API / 端口设置。"); return false; }
   if (action === "connection-setup" && draft) { toast("请先保存或取消项目编辑。"); return; }
   if (action === "start" && !["stopped", "error"].includes(state)) return;
   if (action === "stop" && !["running", "error"].includes(state)) return;
@@ -193,9 +194,12 @@ function renderConnectionSetup() {
   $("connection-setup-banner").hidden = !incomplete;
   $("setup-banner-title").textContent = state.configurationError ? "本机配置需要修复" : incomplete ? "连接配置尚未完成" : "连接配置完整";
   $("setup-banner-summary").textContent = state.configurationError || (missing.length ? "仍缺少：" + missing.join("、") : "Bridge 认证、Runtime API key 和 Tunnel Client 均已配置。");
-  $("settings-open-connection").textContent = setupOpen ? "关闭连接向导" : "连接配置";
-  $("connection-setup-panel").hidden = !setupOpen;
+  const dialog = $("connection-setup-dialog");
+  if (setupOpen && !dialog.open) dialog.showModal();
+  if (!setupOpen && dialog.open) dialog.close();
+  $("connection-setup-panel").hidden = false;
   if (!setupInitialized) {
+    $("setup-tunnel-id").value = state.tunnelId || "";
     $("setup-health-port").value = String(state.defaultHealthPort || 8080);
     $("setup-bridge-port").value = String(state.bridgePort || 3000);
     $("setup-reuse-client").checked = Boolean(state.reuseClientDefault);
@@ -222,16 +226,35 @@ function renderConnectionSetup() {
     $("setup-runtime-key").value = "";
     setupOpen = false;
     setupInitialized = false;
-    $("connection-setup-panel").hidden = true;
-    $("settings-open-connection").textContent = "连接配置";
+    if (dialog.open) dialog.close();
     toast("连接配置已保存，可以启动服务。");
   }
   lastSetupSuccess = Boolean(state.success);
-}async function refresh() {
+}
+function renderApiPortSettings() {
+  const state = snapshot?.connectionSetup;
+  if (!state) return;
+  if (!settingsInitialized) {
+    $("settings-bridge-port").value = String(state.bridgePort || 3000);
+    $("settings-health-port").value = String(state.defaultHealthPort || 8080);
+    $("settings-runtime-key").value = "";
+    settingsInitialized = true;
+  }
+  const dialog = $("api-port-dialog");
+  if (settingsOpen && !dialog.open) dialog.showModal();
+  if (!settingsOpen && dialog.open) dialog.close();
+  $("api-port-hint").textContent = state.tunnelConfigured && !state.tunnelId
+    ? "当前旧 Tunnel profile 未保存 Tunnel ID。可以保存 API key；修改端口前，请先在主界面连接向导中重新初始化一次。"
+    : "修改端口前请先停止 Bridge。若端口变化，系统会同步更新 Tunnel profile 的 MCP 地址。";
+  const busy = localBusy || snapshot.busy || snapshot.status.state !== "stopped";
+  for (const id of ["settings-runtime-key", "settings-bridge-port", "settings-health-port"]) $(id).disabled = busy;
+  $("settings-api-port-submit").disabled = busy;
+}
+async function refresh() {
   snapshot=await request("/api/snapshot");
   if(!currentWorkspaces().some(w=>w.id===selected)){selected=currentWorkspaces()[0]?.id;selectedModule=undefined;}
   $("settings-codex-summary").textContent = (snapshot.codexDefaults?.defaultModel || "未设置") + " · " + (snapshot.codexDefaults?.defaultEffort || "未设置") + "（当前只读）";
-  renderConnectionSetup();renderChain();renderTree();renderInspector();renderLogs();updateButtons();
+  renderConnectionSetup();renderApiPortSettings();renderChain();renderTree();renderInspector();renderLogs();updateButtons();
 }
 async function poll() {
   try{await refresh();}catch(error){$("footer-status").textContent=error.message;$("service-error").textContent=error.message;$("service-error").hidden=false;if(expired)updateButtons();}
@@ -247,10 +270,10 @@ $("settings-toggle").addEventListener("click", event => {
   $("settings-menu").hidden = !$("settings-menu").hidden;
   $("settings-toggle").setAttribute("aria-expanded", String(!$("settings-menu").hidden));
 });
-$("settings-open-connection").addEventListener("click", () => {
+$("settings-open-api-ports").addEventListener("click", () => {
   closeSettingsMenu();
-  setupOpen = !setupOpen;
-  renderConnectionSetup();
+  settingsOpen = true;
+  renderApiPortSettings();
 });
 document.addEventListener("click", event => {
   if (!event.target.closest(".settings-anchor")) closeSettingsMenu();
@@ -258,9 +281,19 @@ document.addEventListener("click", event => {
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") closeSettingsMenu();
 });
-$("setup-banner-open").addEventListener("click",()=>{setupOpen=true;renderConnectionSetup();$("setup-tunnel-id").focus();});
-$("setup-cancel").addEventListener("click",()=>{setupOpen=false;renderConnectionSetup();});
-$("connection-setup-form").addEventListener("submit",async event=>{
+$("connection-wizard").addEventListener("click", () => {
+  setupOpen = true;
+  renderConnectionSetup();
+  $("setup-tunnel-id").focus();
+});
+$("setup-banner-open").addEventListener("click", () => {
+  setupOpen = true;
+  renderConnectionSetup();
+  $("setup-tunnel-id").focus();
+});
+$("setup-cancel").addEventListener("click", () => { setupOpen = false; $("setup-runtime-key").value = ""; renderConnectionSetup(); });
+$("connection-setup-dialog").addEventListener("cancel", () => { setupOpen = false; $("setup-runtime-key").value = ""; });
+$("connection-setup-form").addEventListener("submit", async event => {
   event.preventDefault();
   if(localBusy||snapshot?.busy||snapshot?.status.state!=="stopped")return;
   const tunnelId=$("setup-tunnel-id").value.trim();
@@ -274,6 +307,22 @@ $("connection-setup-form").addEventListener("submit",async event=>{
   $("setup-error").hidden=true;
   await command("connection-setup",{input:{tunnelId,runtimeKey,healthPort,bridgePort,reuseClient:$("setup-reuse-client").checked}});
   $("setup-runtime-key").value="";
+});
+$("settings-api-port-close").addEventListener("click", () => { settingsOpen = false; $("settings-runtime-key").value = ""; renderApiPortSettings(); });
+$("api-port-dialog").addEventListener("cancel", () => { settingsOpen = false; $("settings-runtime-key").value = ""; });
+$("api-port-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if(localBusy||snapshot?.busy||snapshot?.status.state!=="stopped")return;
+  const runtimeKey=$("settings-runtime-key").value;
+  const bridgePort=Number($("settings-bridge-port").value);
+  const healthPort=Number($("settings-health-port").value);
+  if(!Number.isInteger(bridgePort)||bridgePort<1||bridgePort>65535){$("api-port-error").hidden=false;$("api-port-error").textContent="Bridge 端口须为 1–65535。";return;}
+  if(!Number.isInteger(healthPort)||healthPort<1024||healthPort>65535||healthPort===bridgePort){$("api-port-error").hidden=false;$("api-port-error").textContent="健康检查端口须为 1024–65535，且不能与 Bridge 端口相同。";return;}
+  if(!runtimeKey&&!snapshot.connectionSetup.hasRuntimeKey){$("api-port-error").hidden=false;$("api-port-error").textContent="首次配置需要填写 Runtime API key。";return;}
+  $("api-port-error").hidden=true;
+  const ok=await command("save-api-port-settings",{input:{runtimeKey,bridgePort,healthPort}});
+  if(ok){$("settings-runtime-key").value="";settingsOpen=false;settingsInitialized=false;renderApiPortSettings();}
+  else{$("api-port-error").hidden=false;$("api-port-error").textContent=lastCommandError||"保存失败，请检查设置。";}
 });
 window.addEventListener("native-command",event=>{if(["start","stop","restart"].includes(event.detail))void command(event.detail);});
 $("workspace-search").addEventListener("input",()=>snapshot&&renderTree());

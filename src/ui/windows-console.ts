@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_CONFIG_FILE } from "../config.js";
 import { BridgeController, type BridgeControllerStatus, type LogEntry } from "../control/bridge-controller.js";
 import { readWorkspaceConfig, writeWorkspaceConfig, type EditableWorkspace } from "./workspace-config.js";
-import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, connectionSetupInputSchema, type ConnectionSetupProgress } from "./connection-setup.js";
+import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, saveConnectionSettings, connectionSettingsInputSchema, connectionSetupInputSchema, type ConnectionSetupProgress } from "./connection-setup.js";
 import type { CodexDefaultSettings } from "./codex-defaults-config.js";
 import { launchWindowsSshUiApi } from "./windows-ssh-ui-api.js";
 
@@ -276,7 +276,8 @@ public static class ModernFolderPicker
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
 
-        <Button x:Name="SettingsButton" MinWidth="76" Margin="0,0,8,0" ToolTip="连接配置、SSH 主机及 Codex 默认值"><TextBlock Text="设置"/></Button>
+        <Button x:Name="ConnectionWizardButton" MinWidth="100" Margin="0,0,8,0" ToolTip="配置本机 Tunnel 连接"><TextBlock Text="连接向导"/></Button>
+        <Button x:Name="SettingsButton" MinWidth="76" Margin="0,0,8,0" ToolTip="API / 端口、SSH 主机及 Codex 默认值"><TextBlock Text="设置"/></Button>
         <Button x:Name="StartButton" MinWidth="104" Style="{StaticResource PrimaryButtonStyle}">
           <StackPanel Orientation="Horizontal"><Path Width="16" Height="16" Stretch="Uniform" Margin="0,0,7,0" Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" Data="M17.2204 8.68703C18.2558 9.25661 18.2558 10.7434 17.2204 11.313L7.2234 16.812C6.22371 17.362 5 16.6393 5 15.4991L5 4.50093C5 3.36068 6.22371 2.63805 7.2234 3.18795L17.2204 8.68703ZM16.7381 10.4377C17.0833 10.2478 17.0833 9.7522 16.7381 9.56234L6.74113 4.06327C6.4079 3.87997 6 4.12084 6 4.50093L6 15.4991C6 15.8792 6.4079 16.12 6.74114 15.9367L16.7381 10.4377Z"/><TextBlock Text="启动服务" VerticalAlignment="Center"/></StackPanel>
         </Button>
@@ -297,23 +298,27 @@ public static class ModernFolderPicker
           <StackPanel>
             <TextBlock Text="本机设置" FontSize="15" FontWeight="SemiBold" Foreground="#344054" Margin="4,0,0,8"/>
             <TabControl x:Name="SettingsTabs" Height="480">
-            <TabItem Header="连接配置">
+            <TabItem Header="API / 端口">
               <StackPanel Margin="14">
-                <TextBlock Text="Bridge / Tunnel 连接" FontSize="14" FontWeight="SemiBold" Foreground="#344054"/>
+                <TextBlock Text="本机 API 与监听端口" FontSize="14" FontWeight="SemiBold" Foreground="#344054"/>
                 <TextBlock x:Name="SettingsConnectionSummary" Text="正在检查本机配置…" FontSize="11" Foreground="#667085" TextWrapping="Wrap" Margin="0,8,0,12"/>
-                <TextBlock Text="修改 Tunnel ID、Runtime API key、健康检查端口与 Bridge 监听端口。" FontSize="11" Foreground="#667085" TextWrapping="Wrap" Margin="0,0,0,12"/>
-                <Button x:Name="SettingsOpenConnectionButton" Content="打开连接向导" MinWidth="136" HorizontalAlignment="Left" Style="{StaticResource PrimaryButtonStyle}"/>
-                <TextBlock Text="向导在主界面内展开。重新配置前请先停止 Bridge。" FontSize="10" Foreground="#98A2B3" Margin="0,14,0,0" TextWrapping="Wrap"/>
+                <TextBlock Text="Runtime API key（留空保留现有值）" FontSize="11" Foreground="#344054" Margin="0,0,0,5"/>
+                <PasswordBox x:Name="SettingsRuntimeKeyBox" Height="34" Padding="8,0" VerticalContentAlignment="Center" BorderBrush="#D0D5DD" BorderThickness="1" Background="White"/>
+                <TextBlock Text="Bridge 监听端口" FontSize="11" Foreground="#344054" Margin="0,12,0,5"/>
+                <TextBox x:Name="SettingsBridgePortBox" Text="3000"/>
+                <TextBlock Text="Tunnel 健康检查端口" FontSize="11" Foreground="#344054" Margin="0,12,0,5"/>
+                <TextBox x:Name="SettingsHealthPortBox" Text="8080"/>
+                <TextBlock Text="端口修改前必须停止 Bridge。若旧 Tunnel profile 未保存 Tunnel ID，需要先运行连接向导一次。" FontSize="10" Foreground="#98A2B3" TextWrapping="Wrap" Margin="0,10,0,0"/>
+                <Button x:Name="SaveConnectionSettingsButton" Content="保存 API / 端口" MinWidth="132" HorizontalAlignment="Right" Margin="0,14,0,0" Style="{StaticResource PrimaryButtonStyle}"/>
               </StackPanel>
             </TabItem>
             <TabItem Header="SSH 主机">
               <Grid Margin="12,10,12,8">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="140"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <Grid Grid.Row="0" Margin="0,0,0,8">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                  <TextBlock Text="Workspace" Foreground="#344054" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                  <ComboBox x:Name="SshWorkspaceBox" Grid.Column="1" MinWidth="160"/>
-                  <Button x:Name="SshRefreshButton" Grid.Column="2" Content="刷新" MinWidth="58" Margin="8,0,0,0"/>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <StackPanel><TextBlock Text="全部保存的 SSH 主机" FontWeight="SemiBold" Foreground="#344054"/><TextBlock Text="全局列表，所有 trusted-dev Workspace 共用" FontSize="10" Foreground="#98A2B3" Margin="0,3,0,0"/></StackPanel>
+                  <Button x:Name="SshRefreshButton" Grid.Column="1" Content="刷新" MinWidth="58" Margin="8,0,0,0"/>
                 </Grid>
                 <ListView x:Name="SshHostList" Grid.Row="1" BorderBrush="#EAECF0" BorderThickness="1" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                   <ListView.View><GridView AllowsColumnReorder="False">
@@ -321,7 +326,7 @@ public static class ModernFolderPicker
                     <GridViewColumn Header="IP / 地址" Width="162" DisplayMemberBinding="{Binding host}"/>
                     <GridViewColumn Header="端口" Width="54" DisplayMemberBinding="{Binding port}"/>
                     <GridViewColumn Header="用户" Width="83" DisplayMemberBinding="{Binding username}"/>
-                    <GridViewColumn Header="已存密码" Width="68" DisplayMemberBinding="{Binding credentialAvailable}"/>
+                    <GridViewColumn Header="密码状态" Width="68" DisplayMemberBinding="{Binding credentialAvailableLabel}"/>
                   </GridView></ListView.View>
                 </ListView>
                 <Grid Grid.Row="2" Margin="0,10,0,0">
@@ -339,7 +344,7 @@ public static class ModernFolderPicker
                   <Button x:Name="SshDeleteButton" Content="删除" MinWidth="72" IsEnabled="False" Margin="0,0,8,0"/>
                   <Button x:Name="SshSaveButton" Content="保存主机与凭据" MinWidth="132" Style="{StaticResource PrimaryButtonStyle}"/>
                 </StackPanel>
-                <TextBlock x:Name="SshStatusText" Grid.Row="5" Text="选择 Workspace 后管理 SSH 主机。" Foreground="#667085" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                <TextBlock x:Name="SshStatusText" Grid.Row="5" Text="选择主机后编辑；所有 Workspace 共用此列表。" Foreground="#667085" TextWrapping="Wrap" Margin="0,6,0,0"/>
               </Grid>
             </TabItem>
               <TabItem Header="Codex 默认值">
@@ -431,7 +436,7 @@ public static class ModernFolderPicker
 
     <Border Grid.Row="1" Style="{StaticResource PanelBorderStyle}" Padding="14,12" Margin="0,0,0,12">
       <Grid>
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid Grid.Row="0" Margin="2,0,2,9">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <TextBlock Text="连接链路" FontSize="12" FontWeight="SemiBold" Foreground="#475467"/>
@@ -497,8 +502,11 @@ public static class ModernFolderPicker
             <Button x:Name="ConnectionWizardInlineButton" Grid.Column="1" MinWidth="106" Margin="12,0,0,0" Style="{StaticResource PrimaryButtonStyle}"><TextBlock Text="打开连接向导"/></Button>
           </Grid>
         </Border>
-        <Expander x:Name="ConnectionSetupPanel" Grid.Row="4" Header="连接向导" IsExpanded="False" Visibility="Collapsed" Margin="2,8,2,0">
-          <Border Background="#FAFBFC" BorderBrush="#E2E6EC" BorderThickness="1" CornerRadius="7" Padding="12">
+        <Popup x:Name="ConnectionSetupPopup" PlacementTarget="{Binding ElementName=ConnectionWizardButton}" Placement="Bottom" HorizontalOffset="-440" VerticalOffset="8" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+          <Border Width="610" Background="#FFFFFF" BorderBrush="#D0D5DD" BorderThickness="1" CornerRadius="9" Padding="16">
+            <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="4" Opacity="0.16" Color="#344054"/></Border.Effect>
+            <StackPanel>
+              <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="连接向导" FontSize="15" FontWeight="SemiBold" Foreground="#344054"/><TextBlock Text="配置 Tunnel ID 与本机 profile；不会在启动时自动弹出。" FontSize="10" Foreground="#667085" Margin="0,3,0,0"/></StackPanel><Button x:Name="ConnectionSetupCloseButton" Grid.Column="1" Content="关闭" MinWidth="60"/></Grid>
             <Grid>
               <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
               <Grid Grid.Row="0">
@@ -526,8 +534,9 @@ public static class ModernFolderPicker
                 <Button x:Name="SetupApplyButton" Content="验证并保存" MinWidth="110" Style="{StaticResource PrimaryButtonStyle}"/>
               </StackPanel>
             </Grid>
+            </StackPanel>
           </Border>
-        </Expander>
+        </Popup>
       </Grid>
     </Border>
 
@@ -791,10 +800,12 @@ $startButton = $window.FindName('StartButton'); $stopButton = $window.FindName('
 $localMcpButton = $window.FindName('LocalMcpButton'); $localMcpCountText = $window.FindName('LocalMcpCountText'); $localMcpPopup = $window.FindName('LocalMcpPopup'); $localMcpList = $window.FindName('LocalMcpList'); $localMcpSummaryText = $window.FindName('LocalMcpSummaryText'); $localMcpEmptyText = $window.FindName('LocalMcpEmptyText'); $localMcpMessage = $window.FindName('LocalMcpMessage'); $localMcpProbeButton = $window.FindName('LocalMcpProbeButton'); $localMcpLoadButton = $window.FindName('LocalMcpLoadButton'); $localMcpUnloadButton = $window.FindName('LocalMcpUnloadButton')
 $codexDefaultModelBox = $window.FindName('CodexDefaultModelBox'); $codexDefaultEffortBox = $window.FindName('CodexDefaultEffortBox'); $saveGlobalConfigButton = $window.FindName('SaveGlobalConfigButton')
 $settingsButton = $window.FindName('SettingsButton'); $settingsPopup = $window.FindName('SettingsPopup')
-$sshWorkspaceBox=$window.FindName('SshWorkspaceBox'); $sshHostList=$window.FindName('SshHostList'); $sshAliasBox=$window.FindName('SshAliasBox'); $sshAddressBox=$window.FindName('SshAddressBox'); $sshPortBox=$window.FindName('SshPortBox'); $sshUsernameBox=$window.FindName('SshUsernameBox'); $sshPasswordBox=$window.FindName('SshPasswordBox'); $sshRefreshButton=$window.FindName('SshRefreshButton'); $sshNewButton=$window.FindName('SshNewButton'); $sshDeleteButton=$window.FindName('SshDeleteButton'); $sshSaveButton=$window.FindName('SshSaveButton'); $sshStatusText=$window.FindName('SshStatusText')
+$sshHostList=$window.FindName('SshHostList'); $sshAliasBox=$window.FindName('SshAliasBox'); $sshAddressBox=$window.FindName('SshAddressBox'); $sshPortBox=$window.FindName('SshPortBox'); $sshUsernameBox=$window.FindName('SshUsernameBox'); $sshPasswordBox=$window.FindName('SshPasswordBox'); $sshRefreshButton=$window.FindName('SshRefreshButton'); $sshNewButton=$window.FindName('SshNewButton'); $sshDeleteButton=$window.FindName('SshDeleteButton'); $sshSaveButton=$window.FindName('SshSaveButton'); $sshStatusText=$window.FindName('SshStatusText')
 $script:sshPreviousId=''; $script:sshLoading=$false
-$settingsConnectionButton=$window.FindName('SettingsOpenConnectionButton'); $settingsConnectionSummary=$window.FindName('SettingsConnectionSummary'); $connectionWizardInlineButton=$window.FindName('ConnectionWizardInlineButton'); $connectionSetupBanner=$window.FindName('ConnectionSetupBanner'); $connectionSetupSummary=$window.FindName('ConnectionSetupSummary'); $connectionSetupPanel=$window.FindName('ConnectionSetupPanel'); $setupTunnelIdBox=$window.FindName('SetupTunnelIdBox'); $setupRuntimeKeyBox=$window.FindName('SetupRuntimeKeyBox'); $setupHealthPortBox=$window.FindName('SetupHealthPortBox'); $setupBridgePortBox=$window.FindName('SetupBridgePortBox'); $setupReuseClientCheck=$window.FindName('SetupReuseClientCheck'); $setupProgressTitle=$window.FindName('SetupProgressTitle'); $setupProgressDetail=$window.FindName('SetupProgressDetail'); $setupProgressState=$window.FindName('SetupProgressState'); $setupProgressBadge=$window.FindName('SetupProgressBadge'); $setupProgressBar=$window.FindName('SetupProgressBar'); $setupErrorText=$window.FindName('SetupErrorText'); $setupApplyButton=$window.FindName('SetupApplyButton'); $setupCancelButton=$window.FindName('SetupCancelButton')
+$settingsConnectionSummary=$window.FindName('SettingsConnectionSummary'); $settingsRuntimeKeyBox=$window.FindName('SettingsRuntimeKeyBox'); $settingsBridgePortBox=$window.FindName('SettingsBridgePortBox'); $settingsHealthPortBox=$window.FindName('SettingsHealthPortBox'); $saveConnectionSettingsButton=$window.FindName('SaveConnectionSettingsButton'); $connectionWizardButton=$window.FindName('ConnectionWizardButton'); $connectionWizardInlineButton=$window.FindName('ConnectionWizardInlineButton'); $connectionSetupBanner=$window.FindName('ConnectionSetupBanner'); $connectionSetupSummary=$window.FindName('ConnectionSetupSummary'); $connectionSetupPopup=$window.FindName('ConnectionSetupPopup'); $connectionSetupCloseButton=$window.FindName('ConnectionSetupCloseButton'); $setupTunnelIdBox=$window.FindName('SetupTunnelIdBox'); $setupRuntimeKeyBox=$window.FindName('SetupRuntimeKeyBox'); $setupHealthPortBox=$window.FindName('SetupHealthPortBox'); $setupBridgePortBox=$window.FindName('SetupBridgePortBox'); $setupReuseClientCheck=$window.FindName('SetupReuseClientCheck'); $setupProgressTitle=$window.FindName('SetupProgressTitle'); $setupProgressDetail=$window.FindName('SetupProgressDetail'); $setupProgressState=$window.FindName('SetupProgressState'); $setupProgressBadge=$window.FindName('SetupProgressBadge'); $setupProgressBar=$window.FindName('SetupProgressBar'); $setupErrorText=$window.FindName('SetupErrorText'); $setupApplyButton=$window.FindName('SetupApplyButton'); $setupCancelButton=$window.FindName('SetupCancelButton')
 $script:connectionSetupInitialized=$false; $script:connectionSetupBusy=$false; $script:lastConnectionSetupSuccess=$false; $script:setupHasRuntimeKey=$false
+$connectionSetupPopup.Add_Closed({$setupRuntimeKeyBox.Password=''})
+$settingsPopup.Add_Closed({$settingsRuntimeKeyBox.Password=''})
 $bridgeValue = $window.FindName('BridgeValue'); $mcpValue = $window.FindName('McpValue'); $tunnelValue = $window.FindName('TunnelValue'); $codexValue = $window.FindName('CodexValue')
 $bridgeDot = $window.FindName('BridgeDot'); $mcpDot = $window.FindName('McpDot'); $tunnelDot = $window.FindName('TunnelDot'); $codexDot = $window.FindName('CodexDot')
 $bridgeMeta = $window.FindName('BridgeMeta'); $mcpMeta = $window.FindName('McpMeta'); $tunnelMeta = $window.FindName('TunnelMeta'); $codexMeta = $window.FindName('CodexMeta')
@@ -1103,15 +1114,18 @@ function Update-ConnectionSetup($message) {
   if($null -eq $setup){return}
   $missing=@($setup.missingItems)
   if(-not [string]::IsNullOrWhiteSpace([string]$setup.configurationError)){$connectionSetupSummary.Text="配置读取失败："+[string]$setup.configurationError}
-  elseif($setup.ready){$connectionSetupSummary.Text="连接配置完整。需要更换 Tunnel 或端口时，可从这里重新配置。"}
+  elseif($setup.ready){$connectionSetupSummary.Text="连接配置完整。需要首次初始化或更换 Tunnel 时，点击主界面的连接向导。"}
   elseif($missing.Count -gt 0){$connectionSetupSummary.Text="尚缺少："+($missing -join "、")}
   else{$connectionSetupSummary.Text="连接配置尚未完成。"}
   $connectionSetupBanner.Visibility=if($setup.ready){'Collapsed'}else{'Visible'}
-  $settingsConnectionSummary.Text=[string]$connectionSetupSummary.Text
+  $settingsConnectionSummary.Text=if($message.configMessage){[string]$message.configMessage}else{[string]$connectionSetupSummary.Text}
   if(-not $script:connectionSetupInitialized){
+    $setupTunnelIdBox.Text=[string]$setup.tunnelId
     $setupHealthPortBox.Text=[string]$setup.defaultHealthPort
     $setupBridgePortBox.Text=[string]$setup.bridgePort
     $setupReuseClientCheck.IsChecked=[bool]$setup.reuseClientDefault
+    $settingsBridgePortBox.Text=[string]$setup.bridgePort
+    $settingsHealthPortBox.Text=[string]$setup.defaultHealthPort
     $script:connectionSetupInitialized=$true
   }
   $script:setupHasRuntimeKey=[bool]$setup.hasRuntimeKey
@@ -1129,20 +1143,20 @@ function Update-ConnectionSetup($message) {
   }
   $setupErrorText.Text=if($setup.error){[string]$setup.error}elseif($setup.configurationError){[string]$setup.configurationError}else{''}
   $setupErrorText.Visibility=if([string]::IsNullOrWhiteSpace($setupErrorText.Text)){'Collapsed'}else{'Visible'}
-  if($setup.running){$script:connectionSetupBusy=$true}elseif($script:connectionSetupBusy -and ($setup.success -or $setup.error -or $setup.configurationError)){$script:connectionSetupBusy=$false}
+  $script:connectionSetupBusy=[bool]$setup.running
   $formEnabled=(-not $setup.running) -and ($script:currentState -eq 'stopped')
   $setupTunnelIdBox.IsEnabled=$formEnabled;$setupRuntimeKeyBox.IsEnabled=$formEnabled;$setupHealthPortBox.IsEnabled=$formEnabled;$setupBridgePortBox.IsEnabled=$formEnabled;$setupReuseClientCheck.IsEnabled=$formEnabled -and $setup.tunnelConfigured -and $setup.tunnelClientAvailable
   $setupApplyButton.IsEnabled=$formEnabled -and -not [bool]$setup.configurationError
   $setupCancelButton.IsEnabled=-not [bool]$setup.running
-  if(-not $setup.ready -or $setup.running){$startButton.IsEnabled=$false}
-  elseif(-not $script:busy -and -not $script:configDirty -and $script:currentState -in @('stopped','error')){$startButton.IsEnabled=$true}
+  $saveConnectionSettingsButton.IsEnabled=$formEnabled -and -not [bool]$setup.configurationError
   if($setup.success -and -not $script:lastConnectionSetupSuccess){
     $setupRuntimeKeyBox.Password=''
-    $connectionSetupPanel.IsExpanded=$false
-    $connectionSetupPanel.Visibility='Collapsed'
+    $connectionSetupPopup.IsOpen=$false
+    $script:connectionSetupInitialized=$false
   }
   $script:lastConnectionSetupSuccess=[bool]$setup.success
 }
+
 function Read-Snapshot {
   if (-not [IO.File]::Exists($SnapshotPath)) { return }
   $stream = $null; $reader = $null
@@ -1253,39 +1267,24 @@ function Reset-SshEditor {
   } finally { $script:sshLoading=$false }
 }
 function Refresh-SshHosts {
-  $workspace=[string]$sshWorkspaceBox.SelectedItem
-  if([string]::IsNullOrWhiteSpace($workspace)) { $sshHostList.ItemsSource=$null;return }
   try {
-    $result=Invoke-SshUi ('/api/ssh/hosts?workspaceId='+[uri]::EscapeDataString($workspace))
+    $result=Invoke-SshUi '/api/ssh/hosts'
     $script:sshLoading=$true
     try {
-      $sshHostList.ItemsSource=@($result.hosts)
-      $sshStatusText.Text=([string]@($result.hosts).Count)+' 个主机 · 双击或选中后可以编辑；密码永不回显。'
+      $sshHostList.ItemsSource=@($result.hosts | ForEach-Object { [pscustomobject]@{hostId=$_.hostId;host=$_.host;port=$_.port;username=$_.username;credentialAvailable=$_.credentialAvailable;credentialAvailableLabel=$(if($_.credentialAvailable){'已保存'}else{'缺少'})} })
+      $sshStatusText.Text=([string]@($result.hosts).Count)+' 个全局主机 · 所有 trusted-dev Workspace 共用；密码永不回显。'
     } finally { $script:sshLoading=$false }
-  } catch { $sshStatusText.Text='读取主机列表失败，请检查本机 SSH 管理服务。' }
-}
-function Refresh-SshWorkspaces {
-  $selected=[string]$sshWorkspaceBox.SelectedItem
-  try {
-    $response=Invoke-SshUi '/api/ssh/workspaces'
-    $sshWorkspaceBox.Items.Clear()
-    foreach($workspace in @($response.workspaces)){ [void]$sshWorkspaceBox.Items.Add([string]$workspace) }
-    if($sshWorkspaceBox.Items.Count -gt 0){
-      if($selected -and $sshWorkspaceBox.Items.Contains($selected)){$sshWorkspaceBox.SelectedItem=$selected}
-      elseif($script:selectedWorkspaceId -and $sshWorkspaceBox.Items.Contains($script:selectedWorkspaceId)){$sshWorkspaceBox.SelectedItem=$script:selectedWorkspaceId}
-      else{$sshWorkspaceBox.SelectedIndex=0}
-      Refresh-SshHosts
-    }else{ $sshHostList.ItemsSource=$null; $sshStatusText.Text='目前没有可管理 SSH 的 trusted-dev Workspace。' }
-  }catch{ $sshStatusText.Text='本机 SSH 主机服务连接失败；其他 Bridge 功能不受影响。' }
+  } catch { $sshStatusText.Text='读取全局主机列表失败，请检查本机 SSH 管理服务。' }
 }
 
 function Open-ConnectionSetup {
   $localMcpPopup.IsOpen=$false;$settingsPopup.IsOpen=$false
-  $connectionSetupPanel.Visibility='Visible';$connectionSetupPanel.IsExpanded=$true
+  $connectionSetupPopup.IsOpen=$true
 }
+$connectionWizardButton.Add_Click({Open-ConnectionSetup})
 $connectionWizardInlineButton.Add_Click({Open-ConnectionSetup})
-$settingsConnectionButton.Add_Click({Open-ConnectionSetup})
-$setupCancelButton.Add_Click({$connectionSetupPanel.IsExpanded=$false;$connectionSetupPanel.Visibility='Collapsed';$setupRuntimeKeyBox.Password=''})
+$connectionSetupCloseButton.Add_Click({$connectionSetupPopup.IsOpen=$false;$setupRuntimeKeyBox.Password=''})
+$setupCancelButton.Add_Click({$connectionSetupPopup.IsOpen=$false;$setupRuntimeKeyBox.Password=''})
 $setupApplyButton.Add_Click({
   if($script:connectionSetupBusy -or $script:currentState -ne 'stopped'){return}
   $id=$setupTunnelIdBox.Text.Trim()
@@ -1303,13 +1302,19 @@ $setupApplyButton.Add_Click({
   $setupApplyButton.IsEnabled=$false;$startButton.IsEnabled=$false;$stopButton.IsEnabled=$false
   Send-Command 'connection-setup'
 })
-$settingsButton.Add_Click({ $localMcpPopup.IsOpen=$false; $settingsPopup.IsOpen = -not $settingsPopup.IsOpen; if($settingsPopup.IsOpen){Refresh-SshWorkspaces} })
-
-$sshWorkspaceBox.Add_SelectionChanged({
-  if($script:sshLoading){return}
-  Reset-SshEditor
-  Refresh-SshHosts
+$saveConnectionSettingsButton.Add_Click({
+  if($script:connectionSetupBusy -or $script:currentState -ne 'stopped'){return}
+  $bridgePortValue=0;$healthPortValue=0
+  if(-not [int]::TryParse($settingsBridgePortBox.Text,[ref]$bridgePortValue) -or $bridgePortValue -lt 1 -or $bridgePortValue -gt 65535){$settingsConnectionSummary.Text="Bridge 端口须为 1–65535。";return}
+  if(-not [int]::TryParse($settingsHealthPortBox.Text,[ref]$healthPortValue) -or $healthPortValue -lt 1024 -or $healthPortValue -gt 65535 -or $healthPortValue -eq $bridgePortValue){$settingsConnectionSummary.Text="健康检查端口须为 1024–65535，且不能与 Bridge 端口相同。";return}
+  $payload=@{runtimeKey=$settingsRuntimeKeyBox.Password;bridgePort=$bridgePortValue;healthPort=$healthPortValue}|ConvertTo-Json -Depth 4 -Compress
+  [IO.File]::WriteAllText($ConfigEditPath,$payload,(New-Object Text.UTF8Encoding($false)))
+  $settingsRuntimeKeyBox.Password=''
+  $settingsConnectionSummary.Text="正在保存 API / 端口设置…"
+  Send-Command 'save-api-port-settings'
 })
+$settingsButton.Add_Click({ $localMcpPopup.IsOpen=$false; $settingsPopup.IsOpen = -not $settingsPopup.IsOpen; if($settingsPopup.IsOpen){Refresh-SshHosts} })
+
 $sshHostList.Add_SelectionChanged({
   if($script:sshLoading){return}
   $item=$sshHostList.SelectedItem
@@ -1323,22 +1328,20 @@ $sshHostList.Add_SelectionChanged({
   $sshDeleteButton.IsEnabled=$true
   $sshStatusText.Text='编辑主机时密码留空将保留原凭据；修改别名也会迁移凭据。'
 })
-$sshRefreshButton.Add_Click({Refresh-SshWorkspaces})
+$sshRefreshButton.Add_Click({Refresh-SshHosts})
 $sshNewButton.Add_Click({Reset-SshEditor;$sshStatusText.Text='填写主机信息和密码后保存。'})
 $sshSaveButton.Add_Click({
   if($script:sshLoading){return}
-  $workspace=[string]$sshWorkspaceBox.SelectedItem
   $alias=$sshAliasBox.Text.Trim()
   $host=$sshAddressBox.Text.Trim()
   $user=$sshUsernameBox.Text.Trim()
   $port=0
-  if(-not $workspace){$sshStatusText.Text='请先选择 Workspace。';return}
   if($alias -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'){$sshStatusText.Text='主机别名只能使用英文、数字、点、下划线和短横线。';return}
   if(-not $host -or -not $user){$sshStatusText.Text='请填写主机 IP / 地址和用户名。';return}
   if(-not [int]::TryParse($sshPortBox.Text,[ref]$port) -or $port -lt 1 -or $port -gt 65535){$sshStatusText.Text='端口须为 1–65535。';return}
   $password=$sshPasswordBox.Password
   if(-not $script:sshPreviousId -and -not $password){$sshStatusText.Text='新增主机需要填写密码。';return}
-  $payload=@{workspaceId=$workspace;hostId=$alias;host=$host;username=$user;port=$port}
+  $payload=@{hostId=$alias;host=$host;username=$user;port=$port}
   if($script:sshPreviousId){$payload.previousHostId=$script:sshPreviousId}
   if($password){$payload.password=$password}
   $sshSaveButton.IsEnabled=$false
@@ -1356,22 +1359,20 @@ $sshSaveButton.Add_Click({
 })
 $sshDeleteButton.Add_Click({
   $item=$sshHostList.SelectedItem
-  $workspace=[string]$sshWorkspaceBox.SelectedItem
-  if($null -eq $item -or -not $workspace){return}
+  if($null -eq $item){return}
   $alias=[string]$item.hostId
-  $answer=[Windows.MessageBox]::Show(('确定删除 '+$workspace+' / '+$alias+' 及其保存的密码？'), '删除 SSH 主机', [Windows.MessageBoxButton]::YesNo, [Windows.MessageBoxImage]::Warning)
+  $answer=[Windows.MessageBox]::Show(('确定删除全局 SSH 主机 '+$alias+' 及其保存的密码？'), '删除 SSH 主机', [Windows.MessageBoxButton]::YesNo, [Windows.MessageBoxImage]::Warning)
   if($answer -ne [Windows.MessageBoxResult]::Yes){return}
   $sshDeleteButton.IsEnabled=$false
   try {
-    $result=Invoke-SshUi '/api/ssh/remove' 'POST' @{workspaceId=$workspace;hostId=$alias}
+    $result=Invoke-SshUi '/api/ssh/remove' 'POST' @{hostId=$alias}
     Reset-SshEditor
     Refresh-SshHosts
-    $sshStatusText.Text=if($result.removed){'已删除主机及凭据。'}else{'主机不存在，列表已刷新。'}
+    $sshStatusText.Text=if($result.removed){'已删除全局主机及凭据。'}else{'主机不存在，列表已刷新。'}
   } catch {
     $sshStatusText.Text='删除失败；原有主机与凭据未由界面删除。'
   } finally { $sshPasswordBox.Clear() }
 })
-
 $localMcpButton.Add_Click({ $settingsPopup.IsOpen=$false; $localMcpPopup.IsOpen = -not $localMcpPopup.IsOpen })
 $localMcpList.Add_SelectionChanged({ Update-LocalMcpSelection })
 $localMcpProbeButton.Add_Click({
@@ -1423,7 +1424,7 @@ function logKey(logs: readonly LogEntry[]): string { const first=logs[0]; const 
 function parseCommandRecord(raw: string): string | undefined {
   const trimmed=raw.trim().replace(/^\uFEFF/u, ""); if(!trimmed)return undefined;
   const separator=trimmed.indexOf("|"); const command=separator>=0?trimmed.slice(separator+1):trimmed;
-  if (["start","stop","close","save-config","connection-setup"].includes(command)) return command;
+  if (["start","stop","close","save-config","connection-setup","save-api-port-settings"].includes(command)) return command;
   if (/^refresh-codex:[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(command)) return command;
   if (/^unbind-codex:[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(command)) return command;
   if (/^local-mcp-(?:load|unload|probe):[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(command)) return command;
@@ -1529,6 +1530,28 @@ export async function launchLocalControlUi(configPath = path.resolve(process.cwd
       }catch(error){localMcpMessage=`本地 MCP 操作失败：${error instanceof Error?error.message:String(error)}`;controller.addLog("controller","stderr",localMcpMessage)}
       await writeSnapshot(); return
     }
+     if(command==="save-api-port-settings"){
+       let runtimeKey="";
+       try{
+         if(controller.lifecycleState!=="stopped")throw new Error("请先停止 Bridge，再保存 API / 端口设置。");
+         const rawPayload=(await readFile(configEditPath,"utf8")).replace(/^\uFEFF/u,"");
+         await writeFile(configEditPath,"{}","utf8");
+         let parsed;
+         try{parsed=connectionSettingsInputSchema.safeParse(JSON.parse(rawPayload) as unknown)}catch{throw new Error("API / 端口设置数据无效。")}
+         if(!parsed.success)throw new Error("请检查 Runtime API key、Bridge 端口和健康检查端口。");
+         runtimeKey=parsed.data.runtimeKey ?? "";
+         await saveConnectionSettings(configPath,parsed.data);
+         configMessage="API / 端口设置已保存。";
+         controller.addLog("controller","stdout",configMessage);
+         connectionSetupState={running:false,success:false,progress:"设置已保存",error:""};
+       }catch(error){
+         const raw=error instanceof Error?error.message:"保存 API / 端口设置失败。";
+         configMessage=runtimeKey?raw.split(runtimeKey).join("[已隐藏]"):raw;
+         controller.addLog("controller","stderr",configMessage);
+       }finally{runtimeKey="";}
+       await writeSnapshot(); return
+     }
+
     if(command==="connection-setup"){
        let runtimeKey="";
        try{

@@ -1,15 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { createServer } from "node:net";
+import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+async function availablePort(): Promise<number> {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  return address.port;
+}
 
 async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const module = await import("../src/ui/mac-console.js").catch(() => ({ launchMacControlUi: undefined }));
   assert.equal(typeof module.launchMacControlUi, "function", "Mac control host is implemented");
   const root = await mkdtemp(path.join(os.tmpdir(), "bridge-mac-ui-"));
   const configPath = path.join(root, "mcp-bridge.json");
-  await writeFile(configPath, JSON.stringify({ auth: { token: "local-private-token" }, workspaces: [{ id: "mac", root, mode: "trusted-dev", allowedScripts: ["test"] }] }));
+  const port = await availablePort();
+  await writeFile(configPath, JSON.stringify({ host: "127.0.0.1", port, tunnelHealthPort: 8080, auth: { token: "local-private-token" }, workspaces: [{ id: "mac", root, mode: "trusted-dev", allowedScripts: ["test"] }] }));
   await writeFile(path.join(root, ".env"), "CONTROL_PLANE_API_KEY=runtime-private-key\n");
   let state = "stopped", starts = 0, stops = 0;
   let release: (() => void) | undefined;
@@ -80,6 +93,25 @@ test("Mac console dispatches fixed commands and refuses saves while running", as
   assert.equal((await f.request("/api/action", { action: "save-config", revision: snapshot.revision, workspaces: snapshot.workspaces })).status, 409);
   assert.equal((await f.request("/api/action", { action: "stop" })).status, 200);
   assert.equal(f.counts().starts, 1); assert.equal(f.counts().stops, 1);
+});
+
+test("Mac console saves API and port settings through the authenticated action API", async t => {
+  const f = await fixture(t);
+  const before = JSON.parse(await readFile(f.configPath, "utf8"));
+  before.auth.token = "A".repeat(43);
+  await writeFile(f.configPath, JSON.stringify(before, null, 2));
+  const response = await f.request("/api/action", {
+    action: "save-api-port-settings",
+    input: { runtimeKey: "", bridgePort: before.port, healthPort: 8129 },
+  });
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json().catch(() => ({}))));
+  const saved = JSON.parse(await readFile(f.configPath, "utf8"));
+  assert.equal(saved.port, before.port);
+  assert.equal(saved.tunnelHealthPort, 8129);
+  assert.equal(saved.tunnel, undefined);
+  assert.match(await readFile(path.join(f.root, ".env"), "utf8"), /runtime-private-key/u);
+  const snapshot = await (await f.request("/api/snapshot")).json();
+  assert.equal(snapshot.connectionSetup.defaultHealthPort, 8129);
 });
 
 test("Mac console protects concurrent config changes and retains workspace policies", async t => {

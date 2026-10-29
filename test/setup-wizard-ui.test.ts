@@ -11,10 +11,13 @@ test("setup CLI entry opens the existing main console rather than a standalone w
   assert.doesNotMatch(cli, /launchSetupUi|setupUi\(options\)/u);
   assert.match(control, /launchControlUi\(configPath: string\)/u);
   assert.doesNotMatch(control, /launchSetupUi/u);
-  assert.match(windows, /x:Name="SettingsOpenConnectionButton"/u);
-  assert.doesNotMatch(windows, /x:Name="ConnectionWizardButton"/u);
-  assert.match(windows, /x:Name="ConnectionSetupPanel"/u);
+  assert.match(windows, /x:Name="ConnectionWizardButton"/u);
+  assert.match(windows, /x:Name="ConnectionSetupPopup"/u);
+  assert.doesNotMatch(windows, /x:Name="ConnectionSetupPanel"/u);
+  assert.match(windows, /TabItem Header="API \/ 端口"/u);
+  assert.match(windows, /x:Name="SaveConnectionSettingsButton"/u);
   assert.match(windows, /Send-Command 'connection-setup'/u);
+  assert.match(windows, /Send-Command 'save-api-port-settings'/u);
 });
 
 test("Windows main console embeds connection setup and keeps the Runtime API key in a password field", async () => {
@@ -36,16 +39,22 @@ test("macOS main console embeds the same connection setup fields and posts to it
     assert.ok(html.includes('id="' + field + '"'));
   }
   assert.ok(html.includes('id="connection-setup-panel"'));
+  assert.ok(html.includes('id="connection-setup-dialog"'));
+  assert.ok(html.includes('id="connection-wizard"'));
   assert.ok(html.includes('id="settings-toggle"'));
-  assert.ok(html.includes('id="settings-open-connection"'));
+  assert.ok(html.includes('id="settings-open-api-ports"'));
+  assert.ok(html.includes('id="api-port-dialog"'));
   assert.ok(html.includes('id="settings-menu"'));
   assert.ok(html.includes("macOS Keychain 凭据管理尚未实现"));
-  assert.ok(!html.includes('id="setup-connection"'));
+  assert.ok(!html.includes('id="settings-open-connection"'));
   assert.ok(js.includes('command("connection-setup"'));
+  assert.ok(js.includes('command("save-api-port-settings"'));
+  assert.ok(js.includes('dialog.showModal()'));
   assert.ok(js.includes("renderConnectionSetup"));
   assert.ok(server.includes('action: z.literal("connection-setup")'));
+  assert.ok(server.includes('action: z.literal("save-api-port-settings")'));
   assert.ok(server.includes("readConnectionSetupStatus(configPath, connectionSetupState)"));
-  assert.ok(css.includes(".setup-panel"));
+  assert.ok(css.includes(".setup-dialog"));
 });
 
 test("first-run UI bootstraps a local config and reports missing connection requirements", async () => {

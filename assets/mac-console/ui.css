@@ -69,3 +69,11 @@
 .settings-menu-caption{font-size:11px;font-weight:600;padding:5px 8px 2px}
 .settings-menu-note{font-size:11px;line-height:1.55;color:var(--muted);padding:1px 8px 6px}
 .settings-menu-divider{height:1px;background:var(--border);margin:6px 2px}
+
+/* Connection wizard and API/port settings are dialogs, not inline dashboard panels. */
+.setup-dialog{width:min(640px,calc(100vw - 32px));max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);padding:0;border:0;border-radius:11px;background:transparent;color:inherit;overflow:auto}
+.setup-dialog::backdrop{background:rgba(16,24,40,.42);backdrop-filter:blur(3px)}
+.setup-dialog .setup-panel{margin:0;box-shadow:0 22px 70px rgba(16,24,40,.24)}
+.setup-dialog[open]{animation:setup-dialog-in .14s ease-out}
+@keyframes setup-dialog-in{from{opacity:.5;transform:translateY(5px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(prefers-reduced-motion:reduce){.setup-dialog[open]{animation:none}}

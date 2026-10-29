@@ -10,11 +10,12 @@
   <div class="toolbar">
     <button id="restart" class="icon-button" title="重新启动 Bridge 与 Tunnel" aria-label="重新启动">↻</button>
     <button id="stop">停止</button>
+    <button id="connection-wizard">连接向导</button>
     <div class="settings-anchor">
       <button id="settings-toggle" aria-expanded="false" aria-controls="settings-menu">设置</button>
       <div id="settings-menu" class="settings-menu" hidden>
         <p class="settings-menu-title">本机设置</p>
-        <button id="settings-open-connection" class="settings-menu-item">连接配置 <span>›</span></button>
+        <button id="settings-open-api-ports" class="settings-menu-item">API / 端口 <span>›</span></button>
         <div class="settings-menu-divider"></div>
         <p class="settings-menu-caption">SSH 主机管理</p>
         <p class="settings-menu-note">macOS Keychain 凭据管理尚未实现。Windows 可在设置中添加、修改和删除主机。</p>
@@ -31,7 +32,8 @@
     <div class="setup-banner-copy"><span class="setup-banner-icon" aria-hidden="true">!</span><div><h2 id="setup-banner-title">连接配置尚未完成</h2><p id="setup-banner-summary">正在检查本机配置…</p></div></div>
     <button id="setup-banner-open" class="primary">打开连接向导</button>
   </section>
-  <section id="connection-setup-panel" class="setup-panel panel" hidden aria-labelledby="setup-panel-title">
+  <dialog id="connection-setup-dialog" class="setup-dialog">
+  <section id="connection-setup-panel" class="setup-panel panel" aria-labelledby="setup-panel-title">
     <div class="setup-panel-heading"><div><p class="eyebrow">FIRST-RUN SETUP</p><h2 id="setup-panel-title">连接向导</h2><p>在当前控制台完成 Tunnel 配置。配置仅保存在本机，不会同步到 GitHub。</p></div><button id="setup-cancel" class="icon-button" aria-label="关闭连接向导" title="关闭">×</button></div>
     <form id="connection-setup-form" autocomplete="off">
       <div class="setup-form-grid">
@@ -51,6 +53,8 @@
       <div class="setup-actions"><button id="setup-submit" class="primary" type="submit">验证并保存配置</button></div>
     </form>
   </section>
+  </dialog>
+
   <section class="connection panel" aria-label="连接链路">
     <div class="section-heading"><h2>连接链路</h2><div class="service-meta"><span id="lifecycle" class="badge">正在连接控制台</span><span id="runtime-meta"></span></div></div>
     <div class="chain" id="chain"></div><div id="service-error" class="error-message" hidden></div>
@@ -75,6 +79,22 @@
   </section>
 </main>
 <footer><span id="footer-status">正在载入本机控制台…</span><span>关闭应用窗口会停止它管理的服务</span></footer>
+
+<dialog id="api-port-dialog" class="setup-dialog">
+  <section class="setup-panel panel" aria-labelledby="api-port-title">
+    <div class="setup-panel-heading"><div><p class="eyebrow">LOCAL SETTINGS</p><h2 id="api-port-title">API / 端口设置</h2><p>只修改本机 Runtime API key 和监听端口，不会同步到 GitHub。</p></div><button id="settings-api-port-close" class="icon-button" aria-label="关闭 API / 端口设置" title="关闭">×</button></div>
+    <form id="api-port-form" autocomplete="off">
+      <div class="setup-form-grid">
+        <label for="settings-runtime-key">Runtime API key<input id="settings-runtime-key" type="password" placeholder="留空保留现有值" autocomplete="new-password" spellcheck="false"></label>
+        <label for="settings-bridge-port">Bridge 监听端口<input id="settings-bridge-port" type="number" min="1" max="65535" step="1" value="3000" required></label>
+        <label for="settings-health-port">Tunnel 健康检查端口<input id="settings-health-port" type="number" min="1024" max="65535" step="1" value="8080" required></label>
+      </div>
+      <p id="api-port-hint" class="setup-hint">修改端口前请先停止 Bridge。若旧 profile 尚未保存 Tunnel ID，需要先运行连接向导一次。</p>
+      <div id="api-port-error" class="error-message" role="alert" hidden></div>
+      <div class="setup-actions"><button id="settings-api-port-submit" class="primary" type="submit">保存 API / 端口</button></div>
+    </form>
+  </section>
+</dialog>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <dialog id="confirm-dialog"><form method="dialog"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div class="dialog-actions"><button value="cancel">取消</button><button value="confirm" class="danger">确认</button></div></form></dialog>
 </body></html>

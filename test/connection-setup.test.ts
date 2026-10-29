@@ -6,7 +6,7 @@ import path from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 import { loadConfig } from "../src/config.js";
-import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup } from "../src/ui/connection-setup.js";
+import { ensureUiBootstrapConfig, readConnectionSetupStatus, runConnectionSetup, saveConnectionSettings } from "../src/ui/connection-setup.js";
 
 async function temporaryRoot(t: { after(fn: () => Promise<void>): void }): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "bridge-inline-connection-setup-"));
@@ -78,6 +78,8 @@ test("connection setup persists the selected Bridge port and creates a matching 
   const config = await loadConfig(configPath);
   assert.equal(config.port, bridgePort);
   assert.equal(config.tunnel?.healthUrl, "http://127.0.0.1:" + healthPort);
+  assert.equal(config.tunnel?.tunnelId, "tunnel_inline_test");
+  assert.equal(config.tunnelHealthPort, healthPort);
   const urlIndex = initializeArgs.indexOf("--mcp-server-url");
   assert.ok(urlIndex >= 0);
   assert.equal(initializeArgs[urlIndex + 1], "http://127.0.0.1:" + bridgePort + "/mcp");
@@ -130,4 +132,47 @@ test("connection setup rejects an occupied Bridge port before invoking the insta
     install: async () => { installed = true; throw new Error("should not install"); },
   }), /已被占用/u);
   assert.equal(installed, false);
+});
+
+test("API/port settings persist the Runtime API key and both ports before Tunnel setup", async t => {
+  const root = await temporaryRoot(t);
+  const configPath = path.join(root, "mcp-bridge.json");
+  await ensureUiBootstrapConfig(configPath);
+  await setConfigPort(configPath, await freePort());
+  const bridgePort = await freePort();
+  let healthPort = await freePort();
+  while (healthPort === bridgePort) healthPort = await freePort();
+  const runtimeKey = "runtime-key-settings-fixture";
+  await saveConnectionSettings(configPath, { runtimeKey, bridgePort, healthPort });
+  const config = await loadConfig(configPath);
+  assert.equal(config.port, bridgePort);
+  assert.equal(config.tunnelHealthPort, healthPort);
+  assert.equal(config.tunnel, undefined);
+  const env = await readFile(path.join(root, ".env"), "utf8");
+  assert.ok(env.includes('CONTROL_PLANE_API_KEY="' + runtimeKey + '"\n') || env.includes("CONTROL_PLANE_API_KEY=" + runtimeKey));
+  assert.doesNotMatch(await readFile(configPath, "utf8"), new RegExp(runtimeKey));
+  const status = await readConnectionSetupStatus(configPath);
+  assert.equal(status.bridgePort, bridgePort);
+  assert.equal(status.defaultHealthPort, healthPort);
+  assert.equal(status.hasRuntimeKey, true);
+});
+
+test("API/port settings refuse to change ports for a legacy Tunnel profile without a saved Tunnel ID", async t => {
+  const root = await temporaryRoot(t);
+  const configPath = path.join(root, "mcp-bridge.json");
+  await ensureUiBootstrapConfig(configPath);
+  const currentPort = await freePort();
+  await setConfigPort(configPath, currentPort);
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.tunnelHealthPort = 8080;
+  config.tunnel = { clientPath: path.join(root, "fake-tunnel-client"), profile: "legacy", healthUrl: "http://127.0.0.1:8080" };
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+  await writeFile(path.join(root, ".env"), "CONTROL_PLANE_API_KEY=existing-key-fixture\n");
+  const beforeConfig = await readFile(configPath, "utf8");
+  const beforeEnv = await readFile(path.join(root, ".env"), "utf8");
+  await assert.rejects(saveConnectionSettings(configPath, {
+    runtimeKey: "", bridgePort: await freePort(), healthPort: 8080,
+  }), /尚未保存 Tunnel ID/u);
+  assert.equal(await readFile(configPath, "utf8"), beforeConfig);
+  assert.equal(await readFile(path.join(root, ".env"), "utf8"), beforeEnv);
 });

@@ -4,13 +4,11 @@ import path from "node:path";
 import { z } from "zod";
 
 import { isTrustedDevMode } from "../config.js";
-import { SavedSshHostError, SavedSshHostManager, type SavedSshHostView, type UiSaveSshHostRequest } from "../terminal/saved-ssh-hosts.js";
+import { SavedSshHostError, SavedSshHostManager, type SavedSshHostView, type GlobalUiSaveSshHostRequest } from "../terminal/saved-ssh-hosts.js";
 import { readWorkspaceConfig } from "./workspace-config.js";
 
-const id = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u);
 const alias = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u);
 const saveSchema = z.object({
-  workspaceId: id,
   hostId: alias,
   previousHostId: alias.optional(),
   host: z.string().min(1).max(253),
@@ -18,9 +16,9 @@ const saveSchema = z.object({
   port: z.number().int().min(1).max(65535),
   password: z.string().min(1).max(1200).optional(),
 }).strict();
-const removeSchema = z.object({ workspaceId: id, hostId: alias }).strict();
+const removeSchema = z.object({ hostId: alias }).strict();
 
-type HostManager = Pick<SavedSshHostManager, "list" | "saveFromUi" | "remove">;
+type HostManager = Pick<SavedSshHostManager, "listGlobal" | "saveGlobalFromUi" | "removeGlobal">;
 
 export interface SshUiApi {
   readonly origin: string;
@@ -59,10 +57,11 @@ export async function launchWindowsSshUiApi(
   const token = randomBytes(32).toString("hex");
   let origin = "";
 
-  async function requireWorkspace(workspaceId: string): Promise<void> {
+  async function requireTrustedDevAvailable(): Promise<void> {
     const config = await readWorkspaceConfig(configPath);
-    const workspace = config.workspaces.find(item => item.id === workspaceId);
-    if (!workspace || !isTrustedDevMode(workspace.mode)) throw new SavedSshHostError("SSH host management requires a trusted-dev workspace");
+    if (!config.workspaces.some(item => isTrustedDevMode(item.mode))) {
+      throw new SavedSshHostError("SSH host management requires at least one trusted-dev workspace");
+    }
   }
 
   const server = http.createServer((req, res) => {
@@ -83,30 +82,23 @@ export async function launchWindowsSshUiApi(
         send(401, { error: "Unauthorized" }); return;
       }
       const url = new URL(req.url ?? "/", origin);
-      if (req.method === "GET" && url.pathname === "/api/ssh/workspaces") {
-        const config = await readWorkspaceConfig(configPath);
-        send(200, { workspaces: config.workspaces.filter(item => isTrustedDevMode(item.mode)).map(item => item.id) });
-        return;
-      }
       if (req.method === "GET" && url.pathname === "/api/ssh/hosts") {
-        const workspaceId = url.searchParams.get("workspaceId") ?? "";
-        if (!id.safeParse(workspaceId).success) { send(400, { error: "Invalid workspace ID" }); return; }
-        await requireWorkspace(workspaceId);
-        const hosts: SavedSshHostView[] = await manager.list(workspaceId);
+        await requireTrustedDevAvailable();
+        const hosts: SavedSshHostView[] = await manager.listGlobal();
         send(200, { hosts }); return;
       }
       if (req.method === "POST" && url.pathname === "/api/ssh/save") {
         const payload = saveSchema.safeParse(await jsonInput(req));
         if (!payload.success) { send(400, { error: "Invalid SSH host fields" }); return; }
-        await requireWorkspace(payload.data.workspaceId);
-        const host = await manager.saveFromUi(payload.data as UiSaveSshHostRequest);
+        await requireTrustedDevAvailable();
+        const host = await manager.saveGlobalFromUi(payload.data as GlobalUiSaveSshHostRequest);
         send(200, { host, saved: true }); return;
       }
       if (req.method === "POST" && url.pathname === "/api/ssh/remove") {
         const payload = removeSchema.safeParse(await jsonInput(req));
         if (!payload.success) { send(400, { error: "Invalid SSH host alias" }); return; }
-        await requireWorkspace(payload.data.workspaceId);
-        send(200, await manager.remove(payload.data.workspaceId, payload.data.hostId)); return;
+        await requireTrustedDevAvailable();
+        send(200, await manager.removeGlobal(payload.data.hostId)); return;
       }
       send(404, { error: "Not found" });
     })().catch(error => {

@@ -68,6 +68,7 @@ const allowedHostSchema = z.string().min(1).refine(isValidAllowedHost, "must be 
 const allowedOriginSchema = z.string().refine(isExactOrigin, "must be an exact http(s) origin");
 const tunnelConfigSchema = z.object({
   clientPath: z.string().min(1),
+  tunnelId: z.string().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).optional(),
   profileDir: z.string().min(1).optional(),
   profile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, "must be a safe profile name"),
   healthUrl: z.string().url().refine(isLoopbackUrl, "must use a loopback http URL").optional(),
@@ -86,6 +87,7 @@ const codexConfigSchema = z.object({
 const fileConfigSchema = z.object({
   host: z.string().min(1).optional(),
   port: z.number().int().min(1).max(65_535).optional(),
+  tunnelHealthPort: z.number().int().min(1024).max(65535).optional(),
   mcpPath: z.string().regex(/^\/[^\s]*$/, "must be an absolute URL path").optional(),
   maxReadBytes: z.number().int().positive().max(50 * 1024 * 1024).optional(),
   auth: z.object({ token: authTokenSchema }).optional(),
@@ -148,6 +150,7 @@ export interface CodexConfig {
 export interface BridgeConfig {
   readonly host: string;
   readonly port: number;
+  readonly tunnelHealthPort?: number;
   readonly mcpPath: string;
   readonly maxReadBytes: number;
   readonly auth?: AuthConfig;
@@ -161,6 +164,7 @@ export interface BridgeConfig {
 
 export interface TunnelConfig {
   readonly clientPath: string;
+  readonly tunnelId?: string;
   readonly profileDir?: string;
   readonly profile: string;
   readonly healthUrl: string;
@@ -311,6 +315,7 @@ export async function loadConfig(
   return {
     host: parsed.data.host ?? DEFAULT_HOST,
     port: parsed.data.port ?? DEFAULT_PORT,
+    ...(parsed.data.tunnelHealthPort !== undefined ? { tunnelHealthPort: parsed.data.tunnelHealthPort } : {}),
     mcpPath: parsed.data.mcpPath ?? DEFAULT_MCP_PATH,
     maxReadBytes: parsed.data.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
     ...(parsed.data.auth ? { auth: parsed.data.auth } : {}),
@@ -320,6 +325,7 @@ export async function loadConfig(
       ? {
           tunnel: {
             clientPath: path.resolve(configDirectory, parsed.data.tunnel.clientPath),
+            ...(parsed.data.tunnel.tunnelId ? { tunnelId: parsed.data.tunnel.tunnelId } : {}),
             ...(parsed.data.tunnel.profileDir ? { profileDir: path.resolve(configDirectory, parsed.data.tunnel.profileDir) } : {}),
             profile: parsed.data.tunnel.profile,
             healthUrl: parsed.data.tunnel.healthUrl ?? DEFAULT_TUNNEL_HEALTH_URL,
