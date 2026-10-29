@@ -11,34 +11,6 @@ const WINDOWS_PROCESS_QUERY_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $kind = $env:MCP_BRIDGE_PROCESS_QUERY_KIND
 $value = $env:MCP_BRIDGE_PROCESS_QUERY_VALUE
-$nativeSource = @'
-using System;
-using System.Runtime.InteropServices;
-public static class BridgeProcessNative {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct ProcessBasicInformation {
-    public IntPtr Reserved1;
-    public IntPtr PebBaseAddress;
-    public IntPtr Reserved2_0;
-    public IntPtr Reserved2_1;
-    public IntPtr UniqueProcessId;
-    public IntPtr InheritedFromUniqueProcessId;
-  }
-  [DllImport("ntdll.dll")]
-  public static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass, out ProcessBasicInformation processInformation, int processInformationLength, out int returnLength);
-  public static int GetParentProcessId(int processId) {
-    try {
-      using (var process = System.Diagnostics.Process.GetProcessById(processId)) {
-        ProcessBasicInformation info;
-        int returned;
-        int status = NtQueryInformationProcess(process.Handle, 0, out info, Marshal.SizeOf(typeof(ProcessBasicInformation)), out returned);
-        return status == 0 ? info.InheritedFromUniqueProcessId.ToInt32() : 0;
-      }
-    } catch { return 0; }
-  }
-}
-'@
-Add-Type -TypeDefinition $nativeSource -ErrorAction Stop
 if ($kind -eq 'pid') {
   $pidValue = [int]$value
   try { $items = @(Get-Process -Id $pidValue -ErrorAction Stop) } catch { $items = @() }
@@ -61,7 +33,8 @@ foreach ($p in $items) {
   try { $sessionId = [int]$p.SessionId } catch {}
   $results += [pscustomobject]@{
     pid = [int]$p.Id
-    ppid = [BridgeProcessNative]::GetParentProcessId([int]$p.Id)
+    # Get-Process does not expose PPID; 0 means unavailable. Avoid slow WMI/native compilation.
+    ppid = 0
     name = $name
     exe = if ($exe) { $exe } else { $null }
     windowsSessionId = $sessionId
