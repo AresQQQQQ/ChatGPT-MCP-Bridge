@@ -44,15 +44,15 @@ pnpm build
 
 这些命令在 Windows PowerShell 和 macOS Terminal 中都可使用。
 
-### 第 3 步：配置 Tunnel
+### 第 3 步：启动桌面 UI，并在 UI 中配置 Tunnel
 
-运行配置向导：
+**正常使用优先通过桌面 UI 内置的「连接向导」配置，不需要先运行 `pnpm run setup`。** `pnpm run setup` 是独立的终端启动入口，主要用于手动安装、诊断或在桌面 UI 不可用时使用；它不是日常操作的必经步骤。
 
-```sh
-pnpm run setup
-```
+**Windows：** 双击项目根目录的 `bridge-ui.cmd`。
 
-向导会打开本机图形界面，帮助你配置 Tunnel ID、Runtime API key 和健康检查端口，并下载、校验和配置所需的官方 Tunnel 客户端。
+**macOS：** 双击项目根目录的 `bridge-ui.command`。首次运行会按需安装依赖、构建原生 UI，并生成 Finder 可见的 `ChatGPT MCP Bridge.app`；之后也可以直接打开该 `.app`。
+
+在桌面 UI 中点击「连接向导」，按提示填写 Tunnel ID、Runtime API key 和健康检查端口。向导会下载、校验并配置所需的官方 Tunnel 客户端。保存后回到主界面，先不要启动服务；下一步先添加工作区。
 
 准备以下两项：
 
@@ -63,9 +63,9 @@ Tunnel 的管理权限与 ChatGPT 工作空间的使用权限是两回事。请�
 
 > Runtime API key 供本机 Tunnel Client 连接控制平面使用。不要把它填进 ChatGPT 插件的认证栏，也不要提交到 GitHub。
 
-### 第 4 步：添加你要访问的本地项目
+### 第 4 步：在 UI 中添加你要访问的本地项目
 
-Bridge 需要知道 ChatGPT 可以访问哪些目录。配置向导负责 Tunnel 连接；项目目录则在 Bridge 控制台的工作区管理中添加，或编辑本机生成的 `mcp-bridge.json`。
+Bridge 需要知道 ChatGPT 可以访问哪些目录。连接向导只负责 Tunnel 连接；项目目录请在桌面控制台的工作区管理中添加。一般不需要手动编辑 `mcp-bridge.json`。
 
 每个工作区至少有三个关键字段：
 
@@ -84,23 +84,13 @@ Bridge 需要知道 ChatGPT 可以访问哪些目录。配置向导负责 Tunnel
 
 建议第一次先添加一个测试项目，并使用 `workspace` 模式。不要一开始就把整个用户目录或磁盘根目录开放给 Bridge。
 
-### 第 5 步：启动 Bridge，并在 ChatGPT 创建连接
+添加完成后，回到主界面点击「启动服务」，确认 Bridge 和 Tunnel 都已启动并就绪。不要同时启动多份 Bridge，以免端口冲突。
 
-#### 启动本机 Bridge
+### 第 5 步：在 ChatGPT 中创建 MCP 插件
 
-**Windows：** 双击项目目录中的 `bridge-ui.cmd` 打开控制台；也可以在终端运行：
+确认桌面 UI 中的 Bridge 和 Tunnel 都已启动并就绪后，再在 ChatGPT 中完成一次连接器创建。**本机连接向导不会自动创建 ChatGPT 插件。**
 
-```powershell
-.\bridge-ui.cmd
-```
-
-**macOS：** 第一次使用时，双击项目根目录中的 `bridge-ui.command`。它会检查依赖，并在构建产物缺失或过期时自动构建控制台。首次成功构建后，Finder 中会出现 `ChatGPT MCP Bridge.app`，之后可以直接双击该应用启动。
-
-在控制台中点击“启动服务”，确认 Bridge 和 Tunnel 都处于就绪状态。不要同时启动多份 Bridge，以免端口冲突。
-
-#### 在 ChatGPT 中创建 MCP 插件
-
-**本机配置向导不会自动创建 ChatGPT 插件。** 还需要在 ChatGPT 中手动完成一次：
+还需要在 ChatGPT 中手动完成一次：
 
 1. 打开 [ChatGPT Plugins](https://chatgpt.com/plugins)。
 2. 点击添加入口，选择 **Add custom MCP server**。
