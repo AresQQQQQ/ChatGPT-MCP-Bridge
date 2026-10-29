@@ -107,7 +107,7 @@ export class ProcessInspector {
           reject(new CommandPolicyError("Process wait was aborted"));
         };
         if (signal) signal.addEventListener("abort", onAbort, { once: true });
-        timer.unref?.();
+        // Keep this timer referenced: callers await waitForExit and need a guaranteed resolution.
       });
     }
   }
@@ -145,3 +145,4 @@ export class ProcessInspector {
     return parsed;
   }
 }
+
