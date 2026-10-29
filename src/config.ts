@@ -88,6 +88,7 @@ const fileConfigSchema = z.object({
   host: z.string().min(1).optional(),
   port: z.number().int().min(1).max(65_535).optional(),
   tunnelHealthPort: z.number().int().min(1024).max(65535).optional(),
+  tunnelId: z.string().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).optional(),
   mcpPath: z.string().regex(/^\/[^\s]*$/, "must be an absolute URL path").optional(),
   maxReadBytes: z.number().int().positive().max(50 * 1024 * 1024).optional(),
   auth: z.object({ token: authTokenSchema }).optional(),
@@ -151,6 +152,8 @@ export interface BridgeConfig {
   readonly host: string;
   readonly port: number;
   readonly tunnelHealthPort?: number;
+  /** Desired Tunnel ID, retained before a profile has been initialized. */
+  readonly tunnelId?: string;
   readonly mcpPath: string;
   readonly maxReadBytes: number;
   readonly auth?: AuthConfig;
@@ -312,10 +315,13 @@ export async function loadConfig(
     };
   });
 
+  const configuredTunnelId = parsed.data.tunnelId ?? parsed.data.tunnel?.tunnelId;
+
   return {
     host: parsed.data.host ?? DEFAULT_HOST,
     port: parsed.data.port ?? DEFAULT_PORT,
     ...(parsed.data.tunnelHealthPort !== undefined ? { tunnelHealthPort: parsed.data.tunnelHealthPort } : {}),
+    ...(configuredTunnelId ? { tunnelId: configuredTunnelId } : {}),
     mcpPath: parsed.data.mcpPath ?? DEFAULT_MCP_PATH,
     maxReadBytes: parsed.data.maxReadBytes ?? DEFAULT_MAX_READ_BYTES,
     ...(parsed.data.auth ? { auth: parsed.data.auth } : {}),

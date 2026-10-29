@@ -142,8 +142,16 @@ final class BridgeAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate
         alert.beginSheetModal(for: window) { _ in NSApp.terminate(nil) }
     }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let target = navigationAction.request.url, let source = origin, target.scheme == source.scheme, target.host == source.host, target.port == source.port else { decisionHandler(.cancel); return }
-        decisionHandler(.allow)
+        guard let target = navigationAction.request.url, let source = origin else { decisionHandler(.cancel); return }
+        if target.scheme == source.scheme, target.host == source.host, target.port == source.port {
+            decisionHandler(.allow)
+            return
+        }
+        // The connection wizard links only to official OpenAI Platform pages; open them in the user's browser.
+        if target.scheme == "https", target.host == "platform.openai.com" {
+            NSWorkspace.shared.open(target)
+        }
+        decisionHandler(.cancel)
     }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
         if message.name == "closeWizard" {

@@ -14,19 +14,25 @@ test("setup CLI entry opens the existing main console rather than a standalone w
   assert.match(windows, /x:Name="ConnectionWizardButton"/u);
   assert.match(windows, /x:Name="ConnectionSetupPopup"/u);
   assert.doesNotMatch(windows, /x:Name="ConnectionSetupPanel"/u);
-  assert.match(windows, /TabItem Header="API \/ 端口"/u);
+  assert.match(windows, /TabItem Header="连接设置"/u);
   assert.match(windows, /x:Name="SaveConnectionSettingsButton"/u);
-  assert.match(windows, /Send-Command 'connection-setup'/u);
-  assert.match(windows, /Send-Command 'save-api-port-settings'/u);
+  assert.match(windows, /Start-ConnectionUiRequest '\/api\/connection\/setup'/u);
+  assert.match(windows, /Start-ConnectionUiRequest '\/api\/connection\/settings'/u);
 });
 
 test("Windows main console embeds connection setup and keeps the Runtime API key in a password field", async () => {
   const source = await readFile(path.resolve("src/ui/windows-console.ts"), "utf8");
   assert.match(source, /PasswordBox x:Name="SetupRuntimeKeyBox"/u);
   assert.match(source, /x:Name="SetupTunnelIdBox"/u);
-  assert.match(source, /x:Name="SetupBridgePortBox"/u);
+  assert.match(source, /x:Name="SetupTunnelIdLockedPanel"/u);
+  assert.match(source, /x:Name="SetupRuntimeKeyLockedPanel"/u);
+  assert.match(source, /x:Name="SettingsTunnelIdBox"/u);
+  assert.match(source, /https:\/\/platform\.openai\.com\/settings\/organization\/tunnels/u);
+  assert.match(source, /https:\/\/platform\.openai\.com\/settings\/organization\/api-keys/u);
+  assert.doesNotMatch(source, /x:Name="SetupBridgePortBox"/u);
+  assert.doesNotMatch(source, /x:Name="SetupHealthPortBox"/u);
   assert.match(source, /Update-ConnectionSetup\(\$message\)/u);
-  assert.match(source, /runConnectionSetup\(configPath,parsed\.data/u);
+  assert.match(source, /runConnectionSetup\(configPath,input/u);
   assert.match(source, /connectionSetup: Awaited<ReturnType<typeof readConnectionSetupStatus>>/u);
 });
 
@@ -35,10 +41,16 @@ test("macOS main console embeds the same connection setup fields and posts to it
   const js = await readFile(path.resolve("assets/mac-console/ui.js"), "utf8");
   const css = await readFile(path.resolve("assets/mac-console/ui.css"), "utf8");
   const server = await readFile(path.resolve("src/ui/mac-console.ts"), "utf8");
-  for (const field of ["setup-tunnel-id", "setup-runtime-key", "setup-health-port", "setup-bridge-port", "setup-reuse-client"]) {
+  for (const field of ["setup-tunnel-id", "setup-runtime-key", "settings-tunnel-id", "settings-bridge-port", "settings-health-port"]) {
     assert.ok(html.includes('id="' + field + '"'));
   }
   assert.ok(html.includes('id="connection-setup-panel"'));
+  assert.ok(html.includes('id="setup-tunnel-id-locked"'));
+  assert.ok(html.includes('id="setup-runtime-key-locked"'));
+  assert.ok(html.includes("打开 Tunnel 管理页面") || html.includes("organization/tunnels"));
+  assert.ok(html.includes("organization/api-keys"));
+  assert.ok(!html.includes('id="setup-health-port"'));
+  assert.ok(!html.includes('id="setup-bridge-port"'));
   assert.ok(html.includes('id="connection-setup-dialog"'));
   assert.ok(html.includes('id="connection-wizard"'));
   assert.ok(html.includes('id="settings-toggle"'));
@@ -94,4 +106,11 @@ test("setup.command now routes into the main UI entry point", async () => {
   assert.match(script, /tools\/run-setup\.mjs/u);
   assert.match(cmd, /tools\\run-setup\.mjs/u);
   assert.match(cli, /if \(command === "setup"\) return ui\(options\)/u);
+});
+
+test("macOS connection wizard opens official acquisition links in the external browser", async () => {
+  const swift = await readFile(path.resolve("src/ui/macos/BridgeControlApp.swift"), "utf8");
+  assert.match(swift, /target\.host == "platform\.openai\.com"/u);
+  assert.match(swift, /NSWorkspace\.shared\.open\(target\)/u);
+  assert.match(swift, /decisionHandler\(\.cancel\)/u);
 });

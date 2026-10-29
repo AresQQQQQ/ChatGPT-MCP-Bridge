@@ -23,7 +23,7 @@ async function command(action, extra = {}) {
   if (localBusy || snapshot?.busy) return;
   const state = snapshot?.status.state;
   if (action === "start" && snapshot?.connectionSetup?.ready === false) { toast("连接配置尚未完成，请先打开连接向导。"); setupOpen = true; renderConnectionSetup(); return false; }
-  if (action === "save-api-port-settings" && state !== "stopped") { toast("请先停止 Bridge，再保存 API / 端口设置。"); return false; }
+  if (action === "save-api-port-settings" && state !== "stopped") { toast("请先停止 Bridge，再保存连接设置。"); return false; }
   if (action === "connection-setup" && draft) { toast("请先保存或取消项目编辑。"); return; }
   if (action === "start" && !["stopped", "error"].includes(state)) return;
   if (action === "stop" && !["running", "error"].includes(state)) return;
@@ -193,34 +193,38 @@ function renderConnectionSetup() {
   const incomplete = !state.ready;
   $("connection-setup-banner").hidden = !incomplete;
   $("setup-banner-title").textContent = state.configurationError ? "本机配置需要修复" : incomplete ? "连接配置尚未完成" : "连接配置完整";
-  $("setup-banner-summary").textContent = state.configurationError || (missing.length ? "仍缺少：" + missing.join("、") : "Bridge 认证、Runtime API key 和 Tunnel Client 均已配置。");
+  $("setup-banner-summary").textContent = state.configurationError || (missing.length ? "尚缺少：" + missing.join("、") : "连接参数已保存，Tunnel profile 已就绪。");
   const dialog = $("connection-setup-dialog");
   if (setupOpen && !dialog.open) dialog.showModal();
   if (!setupOpen && dialog.open) dialog.close();
-  $("connection-setup-panel").hidden = false;
   if (!setupInitialized) {
     $("setup-tunnel-id").value = state.tunnelId || "";
-    $("setup-health-port").value = String(state.defaultHealthPort || 8080);
-    $("setup-bridge-port").value = String(state.bridgePort || 3000);
-    $("setup-reuse-client").checked = Boolean(state.reuseClientDefault);
+    $("setup-runtime-key").value = "";
     setupInitialized = true;
   }
-  $("setup-key-hint").textContent = state.hasRuntimeKey
-    ? "留空保留本机已有密钥；输入新值会更新 .env。密钥不会显示在日志中。"
-    : "首次配置需要 Runtime API key。密钥只写入本机 .env，不会同步到 GitHub。";
+  $("setup-tunnel-id-field").hidden = Boolean(state.hasTunnelId);
+  $("setup-tunnel-id-locked").hidden = !state.hasTunnelId;
+  $("setup-tunnel-id-readonly").textContent = state.tunnelId || "";
+  $("setup-runtime-key-field").hidden = Boolean(state.hasRuntimeKey);
+  $("setup-runtime-key-locked").hidden = !state.hasRuntimeKey;
+  $("setup-key-hint").textContent = state.hasRuntimeKey || state.hasTunnelId
+    ? "已保存的参数只读显示；请填写缺失项。需要修改已保存的值，请前往「设置 → 连接设置」。"
+    : "首次填写会使用统一连接配置保存接口。Runtime API key 仅保存在本机 .env。";
   $("setup-error").hidden = !state.error;
   $("setup-error").textContent = state.error || "";
   $("setup-progress-title").textContent = state.progress || "等待配置";
   const running = Boolean(state.running);
-  $("setup-progress-state").textContent = running ? "进行中" : state.success ? "已完成" : state.error || state.configurationError ? "需要处理" : "就绪";
-  $("setup-progress-state").className = "badge" + (running ? " warn" : state.success ? " good" : state.error || state.configurationError ? " bad" : "");
+  $("setup-progress-state").textContent = running ? "进行中" : state.ready ? "已完成" : state.error || state.configurationError ? "需要处理" : "待初始化";
+  $("setup-progress-state").className = "badge" + (running ? " warn" : state.ready ? " good" : state.error || state.configurationError ? " bad" : "");
   $("setup-progress-track").hidden = !running;
   $("setup-progress-detail").textContent = running
-    ? "请保持控制台打开。安装和 profile 初始化正在执行。"
-    : state.success ? "配置已保存。现在可以从主界面启动 Bridge 与 Tunnel。" : "提交后会下载并校验官方客户端，再初始化本机 profile。";
+    ? "连接参数已保存，正在准备或验证 Tunnel profile。"
+    : state.ready ? "连接已配置完成。修改 Tunnel ID 或 Runtime API key，请前往设置。" : "参数保存后会安装或复用 Tunnel Client，并初始化本机 profile；失败时已保存的参数仍会保留。";
   const busy = running || localBusy || snapshot.busy || snapshot.status.state !== "stopped";
-  for (const id of ["setup-tunnel-id", "setup-runtime-key", "setup-health-port", "setup-bridge-port", "setup-reuse-client"]) $(id).disabled = busy;
-  $("setup-submit").disabled = busy || Boolean(state.configurationError);
+  $("setup-tunnel-id").disabled = busy || Boolean(state.hasTunnelId);
+  $("setup-runtime-key").disabled = busy || Boolean(state.hasRuntimeKey);
+  $("setup-submit").textContent = state.ready ? "已完成" : state.hasTunnelId && state.hasRuntimeKey ? "继续初始化" : "保存并初始化";
+  $("setup-submit").disabled = busy || Boolean(state.configurationError) || Boolean(state.ready);
   $("setup-cancel").disabled = running || localBusy || Boolean(snapshot.busy);
   if (state.success && !lastSetupSuccess) {
     $("setup-runtime-key").value = "";
@@ -235,6 +239,7 @@ function renderApiPortSettings() {
   const state = snapshot?.connectionSetup;
   if (!state) return;
   if (!settingsInitialized) {
+    $("settings-tunnel-id").value = state.tunnelId || "";
     $("settings-bridge-port").value = String(state.bridgePort || 3000);
     $("settings-health-port").value = String(state.defaultHealthPort || 8080);
     $("settings-runtime-key").value = "";
@@ -243,11 +248,11 @@ function renderApiPortSettings() {
   const dialog = $("api-port-dialog");
   if (settingsOpen && !dialog.open) dialog.showModal();
   if (!settingsOpen && dialog.open) dialog.close();
-  $("api-port-hint").textContent = state.tunnelConfigured && !state.tunnelId
-    ? "当前旧 Tunnel profile 未保存 Tunnel ID。可以保存 API key；修改端口前，请先在主界面连接向导中重新初始化一次。"
-    : "修改端口前请先停止 Bridge。若端口变化，系统会同步更新 Tunnel profile 的 MCP 地址。";
+  $("api-port-hint").textContent = state.tunnelConfigured && !state.tunnelProfileMatchesId
+    ? "Tunnel ID 与当前 profile 不一致；保存新的 Tunnel ID 会重新初始化 profile。"
+    : "修改连接参数前请先停止 Bridge。Tunnel ID 或端口变化时，系统会同步更新 Tunnel profile。";
   const busy = localBusy || snapshot.busy || snapshot.status.state !== "stopped";
-  for (const id of ["settings-runtime-key", "settings-bridge-port", "settings-health-port"]) $(id).disabled = busy;
+  for (const id of ["settings-runtime-key", "settings-tunnel-id", "settings-bridge-port", "settings-health-port"]) $(id).disabled = busy;
   $("settings-api-port-submit").disabled = busy;
 }
 async function refresh() {
@@ -283,45 +288,61 @@ document.addEventListener("keydown", event => {
 });
 $("connection-wizard").addEventListener("click", () => {
   setupOpen = true;
+  setupInitialized = false;
   renderConnectionSetup();
-  $("setup-tunnel-id").focus();
+  if (!snapshot?.connectionSetup?.hasTunnelId) $("setup-tunnel-id").focus();
+  else if (!snapshot?.connectionSetup?.hasRuntimeKey) $("setup-runtime-key").focus();
 });
 $("setup-banner-open").addEventListener("click", () => {
   setupOpen = true;
+  setupInitialized = false;
   renderConnectionSetup();
-  $("setup-tunnel-id").focus();
 });
 $("setup-cancel").addEventListener("click", () => { setupOpen = false; $("setup-runtime-key").value = ""; renderConnectionSetup(); });
 $("connection-setup-dialog").addEventListener("cancel", () => { setupOpen = false; $("setup-runtime-key").value = ""; });
+$("setup-open-settings").addEventListener("click", () => {
+  setupOpen = false;
+  $("setup-runtime-key").value = "";
+  renderConnectionSetup();
+  settingsOpen = true;
+  settingsInitialized = false;
+  renderApiPortSettings();
+  $("settings-tunnel-id").focus();
+});
 $("connection-setup-form").addEventListener("submit", async event => {
   event.preventDefault();
-  if(localBusy||snapshot?.busy||snapshot?.status.state!=="stopped")return;
-  const tunnelId=$("setup-tunnel-id").value.trim();
-  const runtimeKey=$("setup-runtime-key").value;
-  const healthPort=Number($("setup-health-port").value);
-  const bridgePort=Number($("setup-bridge-port").value);
+  if(localBusy||snapshot?.busy||snapshot?.status.state!=="stopped"||snapshot?.connectionSetup?.ready)return;
+  const state=snapshot.connectionSetup;
+  const tunnelId=state.hasTunnelId ? state.tunnelId : $("setup-tunnel-id").value.trim();
+  let runtimeKey=state.hasRuntimeKey ? "" : $("setup-runtime-key").value;
   if(!/^tunnel_[A-Za-z0-9_-]{1,128}$/.test(tunnelId)){toast("Tunnel ID 格式无效，应以 tunnel_ 开头。");return;}
-  if(!Number.isInteger(bridgePort)||bridgePort<1||bridgePort>65535){toast("Bridge 端口须为 1–65535。");return;}
-  if(!Number.isInteger(healthPort)||healthPort<1024||healthPort>65535||healthPort===bridgePort){toast("健康检查端口须为 1024–65535，且不能与 Bridge 端口相同。");return;}
-  if(!runtimeKey&&!snapshot.connectionSetup.hasRuntimeKey){toast("首次配置需要填写 Runtime API key。");return;}
+  if(!runtimeKey&&!state.hasRuntimeKey){toast("请填写 Runtime API key，或前往设置保存。");return;}
   $("setup-error").hidden=true;
-  await command("connection-setup",{input:{tunnelId,runtimeKey,healthPort,bridgePort,reuseClient:$("setup-reuse-client").checked}});
+  const ok=await command("connection-setup",{input:{tunnelId,runtimeKey}});
+  runtimeKey="";
   $("setup-runtime-key").value="";
+  setupInitialized=false;
+  settingsInitialized=false;
+  await refresh();
+  if(!ok) setupOpen=true;
 });
 $("settings-api-port-close").addEventListener("click", () => { settingsOpen = false; $("settings-runtime-key").value = ""; renderApiPortSettings(); });
 $("api-port-dialog").addEventListener("cancel", () => { settingsOpen = false; $("settings-runtime-key").value = ""; });
 $("api-port-form").addEventListener("submit", async event => {
   event.preventDefault();
   if(localBusy||snapshot?.busy||snapshot?.status.state!=="stopped")return;
-  const runtimeKey=$("settings-runtime-key").value;
+  let runtimeKey=$("settings-runtime-key").value;
+  const tunnelId=$("settings-tunnel-id").value.trim();
   const bridgePort=Number($("settings-bridge-port").value);
   const healthPort=Number($("settings-health-port").value);
+  if(tunnelId&&!/^tunnel_[A-Za-z0-9_-]{1,128}$/.test(tunnelId)){$("api-port-error").hidden=false;$("api-port-error").textContent="Tunnel ID 格式无效，应以 tunnel_ 开头。";return;}
   if(!Number.isInteger(bridgePort)||bridgePort<1||bridgePort>65535){$("api-port-error").hidden=false;$("api-port-error").textContent="Bridge 端口须为 1–65535。";return;}
   if(!Number.isInteger(healthPort)||healthPort<1024||healthPort>65535||healthPort===bridgePort){$("api-port-error").hidden=false;$("api-port-error").textContent="健康检查端口须为 1024–65535，且不能与 Bridge 端口相同。";return;}
-  if(!runtimeKey&&!snapshot.connectionSetup.hasRuntimeKey){$("api-port-error").hidden=false;$("api-port-error").textContent="首次配置需要填写 Runtime API key。";return;}
   $("api-port-error").hidden=true;
-  const ok=await command("save-api-port-settings",{input:{runtimeKey,bridgePort,healthPort}});
-  if(ok){$("settings-runtime-key").value="";settingsOpen=false;settingsInitialized=false;renderApiPortSettings();}
+  const input={runtimeKey,bridgePort,healthPort,...(tunnelId?{tunnelId}:{})};
+  const ok=await command("save-api-port-settings",{input});
+  runtimeKey="";input.runtimeKey="";$("settings-runtime-key").value="";
+  if(ok){settingsOpen=false;settingsInitialized=false;setupInitialized=false;await refresh();renderApiPortSettings();}
   else{$("api-port-error").hidden=false;$("api-port-error").textContent=lastCommandError||"保存失败，请检查设置。";}
 });
 window.addEventListener("native-command",event=>{if(["start","stop","restart"].includes(event.detail))void command(event.detail);});

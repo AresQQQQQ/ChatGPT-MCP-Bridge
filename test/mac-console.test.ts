@@ -100,18 +100,22 @@ test("Mac console saves API and port settings through the authenticated action A
   const before = JSON.parse(await readFile(f.configPath, "utf8"));
   before.auth.token = "A".repeat(43);
   await writeFile(f.configPath, JSON.stringify(before, null, 2));
+  let healthPort = await availablePort();
+  while (healthPort === before.port) healthPort = await availablePort();
   const response = await f.request("/api/action", {
     action: "save-api-port-settings",
-    input: { runtimeKey: "", bridgePort: before.port, healthPort: 8129 },
+    input: { runtimeKey: "", tunnelId: "tunnel_mac_settings_test", bridgePort: before.port, healthPort },
   });
   assert.equal(response.status, 200, JSON.stringify(await response.clone().json().catch(() => ({}))));
   const saved = JSON.parse(await readFile(f.configPath, "utf8"));
   assert.equal(saved.port, before.port);
-  assert.equal(saved.tunnelHealthPort, 8129);
+  assert.equal(saved.tunnelHealthPort, healthPort);
+  assert.equal(saved.tunnelId, "tunnel_mac_settings_test");
   assert.equal(saved.tunnel, undefined);
   assert.match(await readFile(path.join(f.root, ".env"), "utf8"), /runtime-private-key/u);
   const snapshot = await (await f.request("/api/snapshot")).json();
-  assert.equal(snapshot.connectionSetup.defaultHealthPort, 8129);
+  assert.equal(snapshot.connectionSetup.defaultHealthPort, healthPort);
+  assert.equal(snapshot.connectionSetup.tunnelId, "tunnel_mac_settings_test");
 });
 
 test("Mac console protects concurrent config changes and retains workspace policies", async t => {

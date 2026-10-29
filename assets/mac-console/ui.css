@@ -77,3 +77,15 @@
 .setup-dialog[open]{animation:setup-dialog-in .14s ease-out}
 @keyframes setup-dialog-in{from{opacity:.5;transform:translateY(5px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(prefers-reduced-motion:reduce){.setup-dialog[open]{animation:none}}
+
+.setup-guidance{border:1px solid var(--border);border-radius:8px;background:var(--surface-subtle);padding:12px 14px;margin:0 0 16px}
+.setup-guidance h3{font-size:12px;margin:0 0 5px}
+.setup-guidance h3:not(:first-child){margin-top:12px}
+.setup-guidance p{font-size:11px;line-height:1.55;color:var(--muted);margin:0 0 5px}
+.setup-guidance a{font-size:11px;font-weight:600;color:var(--accent)}
+.setup-field{margin:0 0 12px}
+.setup-field label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:650}
+.setup-locked-value{display:flex;flex-direction:column;gap:6px;border:1px solid var(--border);border-radius:7px;background:var(--surface-subtle);padding:10px 12px;margin:0 0 12px;font-size:12px}
+.setup-locked-value[hidden]{display:none!important}
+.setup-locked-value .field-title{font-weight:650}
+.setup-locked-value code{overflow-wrap:anywhere}

@@ -8,17 +8,15 @@ import { configFileTemplate, loadConfig, type BridgeConfig } from "../config.js"
 import { setupTunnel, updateRuntimeKey, type SetupDependencies, type SetupInput } from "../setup/tunnel-setup.js";
 
 export const connectionSetupInputSchema = z.object({
-  tunnelId: z.string().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).max(135),
-  runtimeKey: z.string().trim().max(4096),
-  healthPort: z.number().int().min(1024).max(65535),
-  bridgePort: z.number().int().min(1).max(65535).optional(),
-  reuseClient: z.boolean(),
+  tunnelId: z.string().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).max(135).optional(),
+  runtimeKey: z.string().trim().max(4096).optional(),
 }).strict();
 
 export type ConnectionSetupInput = z.infer<typeof connectionSetupInputSchema>;
 
 export const connectionSettingsInputSchema = z.object({
-  runtimeKey: z.string().max(4096).optional(),
+  runtimeKey: z.string().trim().max(4096).optional(),
+  tunnelId: z.string().trim().regex(/^tunnel_[A-Za-z0-9_-]{1,128}$/u).optional(),
   bridgePort: z.number().int().min(1).max(65535),
   healthPort: z.number().int().min(1024).max(65535),
 }).strict();
@@ -36,8 +34,10 @@ export interface ConnectionSetupStatus extends ConnectionSetupProgress {
   readonly configurationError: string;
   readonly hasBridgeAuth: boolean;
   readonly hasRuntimeKey: boolean;
+  readonly hasTunnelId: boolean;
   readonly tunnelConfigured: boolean;
   readonly tunnelId: string;
+  readonly tunnelProfileMatchesId: boolean;
   readonly tunnelClientAvailable: boolean;
   readonly tunnelProfileAvailable: boolean;
   readonly defaultHealthPort: number;
@@ -119,13 +119,19 @@ export async function readConnectionSetupStatus(
 
   const hasBridgeAuth = Boolean(config?.auth?.token);
   const hasRuntimeKey = Boolean(env.CONTROL_PLANE_API_KEY);
+  const tunnelId = config?.tunnelId ?? config?.tunnel?.tunnelId ?? "";
+  const hasTunnelId = Boolean(tunnelId);
   const tunnelConfigured = Boolean(config?.tunnel);
+  const tunnelProfileMatchesId = Boolean(config?.tunnel && config.tunnel.tunnelId && tunnelId && config.tunnel.tunnelId === tunnelId);
   const missingItems: string[] = [];
   if (!hasRuntimeKey) missingItems.push("Runtime API key");
-  if (!tunnelConfigured) missingItems.push("Tunnel ID 与 profile");
+  if (!hasTunnelId) missingItems.push("Tunnel ID");
+  if (!tunnelConfigured) missingItems.push("Tunnel profile 尚未初始化");
+  else if (!tunnelProfileMatchesId) missingItems.push("Tunnel profile 与当前 Tunnel ID 不一致，需要重新初始化");
   else if (!tunnelProfileAvailable) missingItems.push("Tunnel profile 目录");
   else if (!tunnelClientAvailable) missingItems.push("Tunnel Client 文件");
-  const ready = rawConfig !== undefined && !configurationError && hasRuntimeKey && tunnelConfigured && tunnelProfileAvailable && tunnelClientAvailable;
+  const ready = rawConfig !== undefined && !configurationError && hasRuntimeKey && hasTunnelId &&
+    tunnelConfigured && tunnelProfileMatchesId && tunnelProfileAvailable && tunnelClientAvailable;
 
   return {
     ...progress,
@@ -133,11 +139,13 @@ export async function readConnectionSetupStatus(
     configurationError,
     hasBridgeAuth,
     hasRuntimeKey,
+    hasTunnelId,
     tunnelConfigured,
-    tunnelId: config?.tunnel?.tunnelId ?? "",
+    tunnelId,
+    tunnelProfileMatchesId,
     tunnelClientAvailable,
     tunnelProfileAvailable,
-    defaultHealthPort: config?.tunnel?.healthUrl ? portFromHealthUrl(config.tunnel.healthUrl) : config?.tunnelHealthPort ?? 8080,
+    defaultHealthPort: config?.tunnelHealthPort ?? (config?.tunnel?.healthUrl ? portFromHealthUrl(config.tunnel.healthUrl) : 8080),
     reuseClientDefault: tunnelConfigured && tunnelClientAvailable,
     bridgePort: config?.port ?? 3000,
     ready,
@@ -228,9 +236,13 @@ async function persistApiPortSettings(
   }
 }
 
-export async function saveConnectionSettings(configPath: string, value: unknown): Promise<void> {
+export async function saveConnectionSettings(
+  configPath: string,
+  value: unknown,
+  options: { progress?: (message: string) => void } = {},
+): Promise<void> {
   const parsed = connectionSettingsInputSchema.safeParse(value);
-  if (!parsed.success) throw new Error("请检查 Runtime API key、Bridge 端口和健康检查端口。");
+  if (!parsed.success) throw new Error("请检查 Runtime API key、Tunnel ID、Bridge 端口和健康检查端口。");
   const input = parsed.data;
   const absolute = path.resolve(configPath);
   const originalConfig = await readOptional(absolute);
@@ -239,34 +251,45 @@ export async function saveConnectionSettings(configPath: string, value: unknown)
   const healthPort = input.healthPort;
   if (bridgePort === healthPort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
   await assertPortAvailable(bridgePort);
+
   const envPath = path.join(path.dirname(absolute), ".env");
   const oldEnv = await readOptional(envPath);
   const oldKey = parseEnv(oldEnv ?? "").CONTROL_PLANE_API_KEY;
   const suppliedKey = input.runtimeKey?.trim() ?? "";
   const nextKey = suppliedKey || oldKey || "";
-  if (!nextKey) throw new Error("请填写 Runtime API key，或使用连接向导完成首次配置。");
-  const nextEnv = updateRuntimeKey(oldEnv ?? "", nextKey);
+  const nextEnv = nextKey ? updateRuntimeKey(oldEnv ?? "", nextKey) : oldEnv ?? "";
+
+  const existingTunnelId = existing?.tunnelId ?? existing?.tunnel?.tunnelId ?? "";
+  const desiredTunnelId = input.tunnelId?.trim() || existingTunnelId;
   const tunnel = existing?.tunnel;
   const oldHealthPort = portFromHealthUrl(tunnel?.healthUrl);
-  const portsChanged = bridgePort !== (existing?.port ?? 3000) || (Boolean(tunnel) && healthPort !== oldHealthPort);
+  const portsChanged = bridgePort !== (existing?.port ?? 3000) ||
+    (Boolean(tunnel) && healthPort !== oldHealthPort);
+  const tunnelIdChanged = Boolean(tunnel) && desiredTunnelId !== (tunnel?.tunnelId ?? "");
+  const firstTunnelIdSave = Boolean(tunnel && !existingTunnelId && desiredTunnelId);
   if (!tunnel || healthPort !== oldHealthPort) await assertPortAvailable(healthPort);
-  if (tunnel && portsChanged) {
-    if (!tunnel.tunnelId) {
-      throw new Error("当前 Tunnel profile 尚未保存 Tunnel ID。请先通过主界面的连接向导重新初始化一次；之后即可在设置中修改端口。");
-    }
+
+  // First-time credentials/ID are saved even if the profile is absent or needs repair.
+  // For a legacy profile with no known ID, persist the desired values first; the wizard
+  // then performs initialization as a separate retryable step.
+  if (tunnel && !firstTunnelIdSave && (portsChanged || tunnelIdChanged)) {
+    if (!desiredTunnelId) throw new Error("请先填写 Tunnel ID，再修改已初始化 Tunnel 的连接参数。");
+    if (!nextKey) throw new Error("重新初始化 Tunnel 前必须先在设置中保存 Runtime API key。");
     await setupTunnel({
       configPath: absolute,
-      tunnelId: tunnel.tunnelId,
+      tunnelId: desiredTunnelId,
       ...(suppliedKey ? { runtimeKey: suppliedKey } : {}),
       healthPort,
       bridgePort,
       reuseClient: true,
-    });
+    }, options.progress ? { progress: options.progress } : {});
     return;
   }
+
   const raw = JSON.parse(originalConfig ?? configFileTemplate()) as Record<string, unknown>;
   raw.port = bridgePort;
   raw.tunnelHealthPort = healthPort;
+  if (desiredTunnelId) raw.tunnelId = desiredTunnelId;
   await persistApiPortSettings(
     absolute,
     originalConfig,
@@ -284,25 +307,37 @@ export async function runConnectionSetup(
   dependencies: SetupDependencies = {},
 ): Promise<void> {
   const parsed = connectionSetupInputSchema.safeParse(value);
-  if (!parsed.success) throw new Error("请检查 Tunnel ID、Runtime API key、Bridge 端口和健康检查端口。");
+  if (!parsed.success) throw new Error("请检查 Tunnel ID 和 Runtime API key。");
   const input = parsed.data;
   const before = await readConnectionSetupStatus(configPath);
   if (before.configurationError) throw new Error(before.configurationError);
-  if (!input.runtimeKey && !before.hasRuntimeKey) throw new Error("首次配置需要填写 Runtime API key。");
+  const tunnelId = input.tunnelId?.trim() || before.tunnelId;
+  const runtimeKey = input.runtimeKey?.trim() ?? "";
+  if (!tunnelId) throw new Error("请先在连接向导中填写 Tunnel ID，或前往设置保存。");
+  if (!runtimeKey && !before.hasRuntimeKey) throw new Error("请先在连接向导中填写 Runtime API key，或前往设置保存。");
 
-  const existingConfig = await assertBridgeStopped(configPath);
-  const bridgePort = input.bridgePort ?? existingConfig?.port ?? 3000;
-  if (bridgePort === input.healthPort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
-  await assertPortAvailable(bridgePort);
-  await assertPortAvailable(input.healthPort);
+  onProgress("正在保存统一连接配置…");
+  await saveConnectionSettings(configPath, {
+    ...(runtimeKey ? { runtimeKey } : {}),
+    tunnelId,
+    bridgePort: before.bridgePort,
+    healthPort: before.defaultHealthPort,
+  }, { progress: onProgress });
+  onProgress("连接参数已保存，正在准备 Tunnel profile…");
 
+  const afterSave = await readConnectionSetupStatus(configPath);
+  if (afterSave.ready) {
+    onProgress("连接配置与 Tunnel profile 已同步。");
+    return;
+  }
+  if (afterSave.configurationError) throw new Error(afterSave.configurationError);
   const setupInput: SetupInput = {
     configPath: path.resolve(configPath),
-    tunnelId: input.tunnelId,
-    runtimeKey: input.runtimeKey,
-    healthPort: input.healthPort,
-    bridgePort,
-    reuseClient: input.reuseClient,
+    tunnelId,
+    ...(runtimeKey ? { runtimeKey } : {}),
+    healthPort: afterSave.defaultHealthPort,
+    bridgePort: afterSave.bridgePort,
+    reuseClient: afterSave.reuseClientDefault,
   };
   await setupTunnel(setupInput, {
     ...dependencies,

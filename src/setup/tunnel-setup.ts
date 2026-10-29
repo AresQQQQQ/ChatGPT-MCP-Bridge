@@ -196,6 +196,8 @@ export async function setupTunnel(input: SetupInput, deps: SetupDependencies = {
       "--tunnel-id", input.tunnelId, "--mcp-server-url", mcpUrl, "--health-listen-addr", `127.0.0.1:${input.healthPort}`]);
     raw.port = bridgePort;
     raw.tunnelHealthPort = input.healthPort;
+    // Persist the desired ID even when the profile initialization has not completed yet.
+    raw.tunnelId = input.tunnelId;
     raw.tunnel = { clientPath: client, tunnelId: input.tunnelId, profile, profileDir, healthUrl: `http://127.0.0.1:${input.healthPort}` };
     const configTemp = path.join(stage, "config.pending");
     const envTemp = path.join(stage, "env.pending");

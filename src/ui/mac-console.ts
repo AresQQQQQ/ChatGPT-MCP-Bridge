@@ -139,7 +139,10 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     const bindings = status.state === "running"
       ? (await Promise.all(config.workspaces.map(item => controller.getCodexModuleBindings(item.id).catch(() => [])))).flat()
       : [];
-    res.json(sanitize({ status, logs: safeLogs(), workspaces: config.workspaces, codexDefaults: config.codexDefaults, revision: revision(config.key), codexStatus, codexBindings: bindings, localMcpServers: await controller.getLocalMcpServers(), connectionSetup: await readConnectionSetupStatus(configPath, connectionSetupState), busy: !!operation }));
+    const connectionSetup = await readConnectionSetupStatus(configPath, connectionSetupState);
+    const snapshot = sanitize({ status, logs: safeLogs(), workspaces: config.workspaces, codexDefaults: config.codexDefaults, revision: revision(config.key), codexStatus, codexBindings: bindings, localMcpServers: await controller.getLocalMcpServers(), connectionSetup, busy: !!operation });
+    // Tunnel ID is a non-secret identifier needed by the local settings UI; keep log redaction intact.
+    res.json({ ...snapshot, connectionSetup: { ...snapshot.connectionSetup, tunnelId: connectionSetup.tunnelId } });
   });
   app.post("/api/action", async (req, res) => {
     const parsed = actionSchema.safeParse(req.body);
@@ -153,26 +156,30 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     }
     if (operation) { res.status(409).json({ error: "正在执行操作，请稍后重试" }); return; }
     if (input.action === "connection-setup" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再配置连接。" }); return; }
-    if (input.action === "save-api-port-settings" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再保存 API / 端口设置。" }); return; }
+    if (input.action === "save-api-port-settings" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再保存连接设置。" }); return; }
     if (input.action === "save-config" && controller.lifecycleState !== "stopped") {
       res.status(409).json({ error: "请先停止 Bridge 再保存配置" }); return;
     }
     const task = (async () => {
       if (input.action === "connection-setup") {
-        const runtimeKey = input.input.runtimeKey;
+        const runtimeKey = input.input.runtimeKey?.trim() ?? "";
         let persisted = false;
+        let parametersSaved = false;
         if (runtimeKey) secrets.add(runtimeKey);
-        connectionSetupState = { running: true, success: false, progress: "正在检查本机配置…", error: "" };
+        connectionSetupState = { running: true, success: false, progress: "正在保存统一连接配置…", error: "" };
         try {
           await runConnectionSetup(configPath, input.input, message => {
-            connectionSetupState = { running: true, success: false, progress: redact(message), error: "" };
+            const safe = redact(message);
+            if (safe.includes("连接参数已保存")) parametersSaved = true;
+            connectionSetupState = { running: true, success: false, progress: safe, error: "" };
           });
           await refreshSecrets(await readFile(configPath, "utf8"));
           persisted = true;
           connectionSetupState = { running: false, success: true, progress: "连接配置已保存，可以启动 Bridge。", error: "" };
         } catch (error) {
           const message = redact(error instanceof Error ? error.message : "连接配置失败。");
-          connectionSetupState = { running: false, success: false, progress: "连接配置未完成", error: message };
+          if (parametersSaved) persisted = true;
+          connectionSetupState = { running: false, success: false, progress: parametersSaved ? "连接参数已保存，连接初始化未完成" : "连接配置未完成", error: message };
           throw new Error(message);
         } finally {
           if (runtimeKey && !persisted) secrets.delete(runtimeKey);
@@ -181,14 +188,17 @@ export async function launchMacControlUi(configPath: string, options: MacControl
         const runtimeKey = input.input.runtimeKey?.trim() ?? "";
         let persisted = false;
         if (runtimeKey) secrets.add(runtimeKey);
+        connectionSetupState = { running: true, success: false, progress: "正在保存连接设置…", error: "" };
         try {
-          await saveConnectionSettings(configPath, input.input);
+          await saveConnectionSettings(configPath, input.input, { progress: message => {
+            connectionSetupState = { running: true, success: false, progress: redact(message), error: "" };
+          } });
           persisted = true;
           await refreshSecrets(await readFile(configPath, "utf8"));
-          connectionSetupState = { running: false, success: false, progress: "API / 端口设置已保存", error: "" };
+          connectionSetupState = { running: false, success: false, progress: "设置已保存", error: "" };
         } catch (error) {
-          const message = redact(error instanceof Error ? error.message : "保存 API / 端口设置失败。");
-          connectionSetupState = { running: false, success: false, progress: "API / 端口设置未完成", error: message };
+          const message = redact(error instanceof Error ? error.message : "保存连接设置失败。");
+          connectionSetupState = { running: false, success: false, progress: "设置未完成", error: message };
           throw new Error(message);
         } finally {
           if (runtimeKey && !persisted) secrets.delete(runtimeKey);

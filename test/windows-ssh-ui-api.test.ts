@@ -134,9 +134,47 @@ test("SSH UI adds, edits, renames, changes password and deletes hosts globally",
   assert.deepEqual(await otherManager.list("dev"), []);
 });
 
+test("Windows connection configuration API keeps Runtime API keys out of file-based commands and responses", { skip: process.platform !== "win32" }, async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "bridge-connection-ui-api-"));
+  const configPath = path.join(root, "mcp-bridge.json");
+  await writeFile(configPath, JSON.stringify({
+    host: "127.0.0.1", port: 39991, auth: { token: "A".repeat(43) },
+    workspaces: [{ id: "dev", root, mode: "trusted-dev", allowedScripts: [] }],
+  }));
+  const vault = new MemoryVault();
+  let settingsInput: unknown;
+  let setupInput: unknown;
+  const api = await launchWindowsSshUiApi(configPath, {
+    manager: new SavedSshHostManager(path.join(root, "ssh-hosts.json"), vault),
+    onConnectionSettings: async input => {
+      settingsInput = input;
+      throw new Error("test failure with key " + (input.runtimeKey ?? ""));
+    },
+    onConnectionSetup: async input => { setupInput = input; },
+  });
+  t.after(async () => { await api.close(); await rm(root, { recursive: true, force: true }); });
+  const post = async (route: string, body: unknown) => fetch(api.origin + route, {
+    method: "POST",
+    headers: { Authorization: "Bearer " + api.token, Origin: api.origin, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const runtimeKey = "runtime-key-never-echo-this-fixture";
+  const settings = await post("/api/connection/settings", {
+    runtimeKey, tunnelId: "tunnel_connection_fixture", bridgePort: 3001, healthPort: 8081,
+  });
+  assert.equal(settings.status, 400);
+  assert.deepEqual(settingsInput, { runtimeKey, tunnelId: "tunnel_connection_fixture", bridgePort: 3001, healthPort: 8081 });
+  const settingsBody = await settings.text();
+  assert.match(settingsBody, /\[已隐藏\]/u);
+  assert.doesNotMatch(settingsBody, new RegExp(runtimeKey));
+  const setup = await post("/api/connection/setup", { tunnelId: "tunnel_connection_fixture", runtimeKey: "" });
+  assert.equal(setup.status, 200);
+  assert.deepEqual(setupInput, { tunnelId: "tunnel_connection_fixture", runtimeKey: "" });
+});
+
 test("Windows WPF settings group API/ports, global SSH and Codex without putting SSH passwords in command files", async () => {
   const ui = await readFile(path.resolve("src/ui/windows-console.ts"), "utf8");
-  assert.match(ui, /TabItem Header="API \/ 端口"/u);
+  assert.match(ui, /TabItem Header="连接设置"/u);
   assert.match(ui, /TabItem Header="SSH 主机"/u);
   assert.match(ui, /TabItem Header="Codex 默认值"/u);
   assert.match(ui, /x:Name="ConnectionWizardButton"/u);
@@ -144,6 +182,14 @@ test("Windows WPF settings group API/ports, global SSH and Codex without putting
   assert.match(ui, /PasswordBox x:Name="SshPasswordBox"/u);
   assert.match(ui, /Invoke-SshUi '\/api\/ssh\/save' 'POST'/u);
   assert.match(ui, /BRIDGE_SSH_UI_TOKEN:sshUiApi\.token/u);
+  assert.match(ui, /Start-ConnectionUiRequest '\/api\/connection\/setup'/u);
+  assert.match(ui, /Start-ConnectionUiRequest '\/api\/connection\/settings'/u);
+  const setupHandler = ui.slice(ui.indexOf("$setupApplyButton.Add_Click({"), ui.indexOf("$saveConnectionSettingsButton.Add_Click({"));
+  const settingsHandler = ui.slice(ui.indexOf("$saveConnectionSettingsButton.Add_Click({"), ui.indexOf("$settingsButton.Add_Click"));
+  assert.doesNotMatch(setupHandler, /WriteAllText\(\$ConfigEditPath/u);
+  assert.doesNotMatch(settingsHandler, /WriteAllText\(\$ConfigEditPath/u);
+  assert.doesNotMatch(ui, /Send-Command 'connection-setup'/u);
+  assert.doesNotMatch(ui, /Send-Command 'save-api-port-settings'/u);
   assert.doesNotMatch(ui, /SshWorkspaceBox/u);
   assert.doesNotMatch(ui, /Password=.*CommandPath|ConfigEditPath.*SshPassword/u);
 });

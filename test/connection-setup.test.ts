@@ -20,6 +20,13 @@ async function setConfigPort(configPath: string, port: number): Promise<void> {
   await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
 }
 
+async function setConfigPorts(configPath: string, bridgePort: number, healthPort: number): Promise<void> {
+  const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+  config.port = bridgePort;
+  config.tunnelHealthPort = healthPort;
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+}
+
 async function freePort(): Promise<number> {
   const server = createServer();
   server.listen(0, "127.0.0.1");
@@ -45,24 +52,23 @@ test("first-run bootstrap creates a minimal local config without overwriting an 
   assert.equal(status.ready, false);
   assert.equal(status.hasRuntimeKey, false);
   assert.ok(status.missingItems.includes("Runtime API key"));
-  assert.ok(status.missingItems.includes("Tunnel ID 与 profile"));
+  assert.ok(status.missingItems.includes("Tunnel ID"));
+  assert.ok(status.missingItems.includes("Tunnel profile 尚未初始化"));
 });
 
-test("connection setup persists the selected Bridge port and creates a matching Tunnel MCP URL", async t => {
+test("connection setup saves shared settings first and creates a matching Tunnel MCP URL", async t => {
   const root = await temporaryRoot(t);
   const configPath = path.join(root, "mcp-bridge.json");
   await ensureUiBootstrapConfig(configPath);
-  await setConfigPort(configPath, await freePort());
-  const bridgePort = await freePort();
-  const healthPort = bridgePort === 8080 ? 8081 : 8080;
+  let bridgePort = await freePort();
+  let healthPort = await freePort();
+  while (healthPort === bridgePort) healthPort = await freePort();
+  await setConfigPorts(configPath, bridgePort, healthPort);
   let initializeArgs: string[] = [];
   const progress: string[] = [];
   await runConnectionSetup(configPath, {
     tunnelId: "tunnel_inline_test",
     runtimeKey: "runtime-key-fixture",
-    healthPort,
-    bridgePort,
-    reuseClient: false,
   }, message => progress.push(message), {
     install: async directory => {
       const client = path.join(directory, "fake-tunnel-client");
@@ -79,37 +85,61 @@ test("connection setup persists the selected Bridge port and creates a matching 
   assert.equal(config.port, bridgePort);
   assert.equal(config.tunnel?.healthUrl, "http://127.0.0.1:" + healthPort);
   assert.equal(config.tunnel?.tunnelId, "tunnel_inline_test");
+  assert.equal(config.tunnelId, "tunnel_inline_test");
   assert.equal(config.tunnelHealthPort, healthPort);
   const urlIndex = initializeArgs.indexOf("--mcp-server-url");
   assert.ok(urlIndex >= 0);
   assert.equal(initializeArgs[urlIndex + 1], "http://127.0.0.1:" + bridgePort + "/mcp");
-  assert.ok(progress.length >= 0);
+  assert.ok(progress.some(message => message.includes("保存统一连接配置")));
   const status = await readConnectionSetupStatus(configPath);
   assert.equal(status.ready, true);
   assert.equal(status.hasRuntimeKey, true);
+  assert.equal(status.hasTunnelId, true);
   assert.equal(status.tunnelClientAvailable, true);
 });
 
-test("connection setup rejects colliding ports before invoking the installer", async t => {
+test("wizard keeps first-time API key and Tunnel ID after profile initialization fails", async t => {
   const root = await temporaryRoot(t);
   const configPath = path.join(root, "mcp-bridge.json");
   await ensureUiBootstrapConfig(configPath);
-  await setConfigPort(configPath, await freePort());
-  await writeFile(path.join(root, ".env"), "CONTROL_PLANE_API_KEY=existing-runtime-key\n");
-  let installed = false;
+  const bridgePort = await freePort();
+  let healthPort = await freePort();
+  while (healthPort === bridgePort) healthPort = await freePort();
+  await setConfigPorts(configPath, bridgePort, healthPort);
   await assert.rejects(runConnectionSetup(configPath, {
-    tunnelId: "tunnel_inline_test",
-    runtimeKey: "",
-    healthPort: 3200,
-    bridgePort: 3200,
-    reuseClient: false,
+    tunnelId: "tunnel_saved_after_failure",
+    runtimeKey: "runtime-key-preserved-fixture",
   }, () => undefined, {
-    install: async () => { installed = true; throw new Error("should not install"); },
-  }), /不能与 Bridge 端口相同/u);
-  assert.equal(installed, false);
+    install: async () => { throw new Error("simulated installer failure"); },
+  }), /simulated installer failure/u);
+  const config = await loadConfig(configPath);
+  assert.equal(config.tunnelId, "tunnel_saved_after_failure");
+  assert.equal(config.tunnel, undefined);
+  const env = await readFile(path.join(root, ".env"), "utf8");
+  assert.ok(env.includes("runtime-key-preserved-fixture"));
+  const status = await readConnectionSetupStatus(configPath);
+  assert.equal(status.hasTunnelId, true);
+  assert.equal(status.hasRuntimeKey, true);
+  assert.equal(status.ready, false);
 });
 
-test("connection setup rejects an occupied Bridge port before invoking the installer", async t => {
+test("API/port settings reject colliding ports before saving anything", async t => {
+  const root = await temporaryRoot(t);
+  const configPath = path.join(root, "mcp-bridge.json");
+  await ensureUiBootstrapConfig(configPath);
+  const currentPort = await freePort();
+  await setConfigPort(configPath, currentPort);
+  await writeFile(path.join(root, ".env"), "CONTROL_PLANE_API_KEY=existing-runtime-key\n");
+  const beforeConfig = await readFile(configPath, "utf8");
+  const beforeEnv = await readFile(path.join(root, ".env"), "utf8");
+  await assert.rejects(saveConnectionSettings(configPath, {
+    runtimeKey: "", bridgePort: 3200, healthPort: 3200,
+  }), /不能与 Bridge 端口相同/u);
+  assert.equal(await readFile(configPath, "utf8"), beforeConfig);
+  assert.equal(await readFile(path.join(root, ".env"), "utf8"), beforeEnv);
+});
+
+test("API/port settings reject an occupied Bridge port before changing config", async t => {
   const root = await temporaryRoot(t);
   const configPath = path.join(root, "mcp-bridge.json");
   await ensureUiBootstrapConfig(configPath);
@@ -120,18 +150,16 @@ test("connection setup rejects an occupied Bridge port before invoking the insta
   await once(occupied, "listening");
   const address = occupied.address();
   assert.ok(address && typeof address !== "string");
-  let installed = false;
   t.after(async () => { await new Promise<void>(resolve => occupied.close(() => resolve())); });
-  await assert.rejects(runConnectionSetup(configPath, {
-    tunnelId: "tunnel_inline_test",
-    runtimeKey: "",
-    healthPort: address.port === 8080 ? 8081 : 8080,
-    bridgePort: address.port,
-    reuseClient: false,
-  }, () => undefined, {
-    install: async () => { installed = true; throw new Error("should not install"); },
+  const beforeConfig = await readFile(configPath, "utf8");
+  const beforeEnv = await readFile(path.join(root, ".env"), "utf8");
+  let healthPort = await freePort();
+  while (healthPort === address.port) healthPort = await freePort();
+  await assert.rejects(saveConnectionSettings(configPath, {
+    runtimeKey: "", bridgePort: address.port, healthPort,
   }), /已被占用/u);
-  assert.equal(installed, false);
+  assert.equal(await readFile(configPath, "utf8"), beforeConfig);
+  assert.equal(await readFile(path.join(root, ".env"), "utf8"), beforeEnv);
 });
 
 test("API/port settings persist the Runtime API key and both ports before Tunnel setup", async t => {
@@ -143,10 +171,11 @@ test("API/port settings persist the Runtime API key and both ports before Tunnel
   let healthPort = await freePort();
   while (healthPort === bridgePort) healthPort = await freePort();
   const runtimeKey = "runtime-key-settings-fixture";
-  await saveConnectionSettings(configPath, { runtimeKey, bridgePort, healthPort });
+  await saveConnectionSettings(configPath, { runtimeKey, tunnelId: "tunnel_settings_fixture", bridgePort, healthPort });
   const config = await loadConfig(configPath);
   assert.equal(config.port, bridgePort);
   assert.equal(config.tunnelHealthPort, healthPort);
+  assert.equal(config.tunnelId, "tunnel_settings_fixture");
   assert.equal(config.tunnel, undefined);
   const env = await readFile(path.join(root, ".env"), "utf8");
   assert.ok(env.includes('CONTROL_PLANE_API_KEY="' + runtimeKey + '"\n') || env.includes("CONTROL_PLANE_API_KEY=" + runtimeKey));
@@ -155,6 +184,8 @@ test("API/port settings persist the Runtime API key and both ports before Tunnel
   assert.equal(status.bridgePort, bridgePort);
   assert.equal(status.defaultHealthPort, healthPort);
   assert.equal(status.hasRuntimeKey, true);
+  assert.equal(status.hasTunnelId, true);
+  assert.equal(status.tunnelId, "tunnel_settings_fixture");
 });
 
 test("API/port settings refuse to change ports for a legacy Tunnel profile without a saved Tunnel ID", async t => {
@@ -172,7 +203,7 @@ test("API/port settings refuse to change ports for a legacy Tunnel profile witho
   const beforeEnv = await readFile(path.join(root, ".env"), "utf8");
   await assert.rejects(saveConnectionSettings(configPath, {
     runtimeKey: "", bridgePort: await freePort(), healthPort: 8080,
-  }), /尚未保存 Tunnel ID/u);
+  }), /请先填写 Tunnel ID/u);
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
   assert.equal(await readFile(path.join(root, ".env"), "utf8"), beforeEnv);
 });

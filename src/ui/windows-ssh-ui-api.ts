@@ -6,6 +6,7 @@ import { z } from "zod";
 import { isTrustedDevMode } from "../config.js";
 import { SavedSshHostError, SavedSshHostManager, type SavedSshHostView, type GlobalUiSaveSshHostRequest } from "../terminal/saved-ssh-hosts.js";
 import { readWorkspaceConfig } from "./workspace-config.js";
+import { connectionSetupInputSchema, connectionSettingsInputSchema, type ConnectionSetupInput, type ConnectionSettingsInput } from "./connection-setup.js";
 
 const alias = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u);
 const saveSchema = z.object({
@@ -50,7 +51,11 @@ async function jsonInput(req: http.IncomingMessage): Promise<unknown> {
 /** Local-only WPF credentials channel. Passwords travel in memory over loopback, never via command files. */
 export async function launchWindowsSshUiApi(
   configPath: string,
-  options: { manager?: HostManager } = {},
+  options: {
+    manager?: HostManager;
+    onConnectionSetup?: (input: ConnectionSetupInput, progress: (message: string) => void) => Promise<void>;
+    onConnectionSettings?: (input: ConnectionSettingsInput, progress: (message: string) => void) => Promise<void>;
+  } = {},
 ): Promise<SshUiApi> {
   if (process.platform !== "win32") throw new Error("SSH password management requires Windows Credential Manager");
   const manager = options.manager ?? new SavedSshHostManager(path.join(path.dirname(path.resolve(configPath)), ".mcp-bridge-state", "ssh-hosts.json"));
@@ -93,6 +98,34 @@ export async function launchWindowsSshUiApi(
         await requireTrustedDevAvailable();
         const host = await manager.saveGlobalFromUi(payload.data as GlobalUiSaveSshHostRequest);
         send(200, { host, saved: true }); return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/connection/setup") {
+        const payload = connectionSetupInputSchema.safeParse(await jsonInput(req));
+        if (!payload.success) { send(400, { error: "请检查 Tunnel ID 和 Runtime API key。" }); return; }
+        if (!options.onConnectionSetup) { send(503, { error: "连接向导服务不可用。" }); return; }
+        try {
+          await options.onConnectionSetup(payload.data, () => undefined);
+          send(200, { ok: true });
+        } catch (error) {
+          const raw = error instanceof Error ? error.message : "连接初始化失败。";
+          const key = payload.data.runtimeKey ?? "";
+          send(400, { error: key ? raw.split(key).join("[已隐藏]") : raw });
+        }
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/api/connection/settings") {
+        const payload = connectionSettingsInputSchema.safeParse(await jsonInput(req));
+        if (!payload.success) { send(400, { error: "请检查 Runtime API key、Tunnel ID 和端口设置。" }); return; }
+        if (!options.onConnectionSettings) { send(503, { error: "连接设置服务不可用。" }); return; }
+        try {
+          await options.onConnectionSettings(payload.data, () => undefined);
+          send(200, { ok: true });
+        } catch (error) {
+          const raw = error instanceof Error ? error.message : "保存连接设置失败。";
+          const key = payload.data.runtimeKey ?? "";
+          send(400, { error: key ? raw.split(key).join("[已隐藏]") : raw });
+        }
+        return;
       }
       if (req.method === "POST" && url.pathname === "/api/ssh/remove") {
         const payload = removeSchema.safeParse(await jsonInput(req));
