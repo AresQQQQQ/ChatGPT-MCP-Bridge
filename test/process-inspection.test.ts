@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { CommandPolicyError, ProcessInspector } from "../src/commands/index.js";
+import { CommandPolicyError, ProcessInspector, parseTaskListCsv } from "../src/commands/index.js";
+
+test("tasklist CSV parser handles quoted fields and no-task output", () => {
+  const parsed = parseTaskListCsv('"node.exe","4321","Console","1","58,432 K"\r\n"powershell.exe","4322","Console","1","20,000 K"\r\nINFO: No tasks are running which match the specified criteria.');
+  assert.deepEqual(parsed, [
+    { pid: 4321, ppid: 0, name: "node.exe", windowsSessionId: 1 },
+    { pid: 4322, ppid: 0, name: "powershell.exe", windowsSessionId: 1 },
+  ]);
+  assert.deepEqual(parseTaskListCsv("INFO: No tasks are running which match the specified criteria."), []);
+});
 
 test("ProcessInspector inspects the current Windows process without exposing command line", { skip: process.platform !== "win32" }, async () => {
   const inspector = new ProcessInspector();

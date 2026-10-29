@@ -7,51 +7,47 @@ import { CommandPolicyError, type CommandExecutor, type PlannedCommand } from ".
 const PROCESS_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const MAX_PROCESS_RESULTS = 200;
 
-const WINDOWS_PROCESS_QUERY_SCRIPT = String.raw`
-$ErrorActionPreference = 'Stop'
-$kind = $env:MCP_BRIDGE_PROCESS_QUERY_KIND
-$value = $env:MCP_BRIDGE_PROCESS_QUERY_VALUE
-if ($kind -eq 'pid') {
-  $pidValue = [int]$value
-  try { $items = @(Get-Process -Id $pidValue -ErrorAction Stop) } catch { $items = @() }
-} elseif ($kind -eq 'name') {
-  if ($value -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { throw 'invalid process name' }
-  $processName = [IO.Path]::GetFileNameWithoutExtension($value)
-  $items = @(Get-Process -Name $processName -ErrorAction SilentlyContinue)
-} else {
-  throw 'invalid query kind'
-}
-$results = @()
-foreach ($p in $items) {
-  # Keep process inspection fast and non-invasive: reading MainModule/Path can block on hosted runners.
-  $name = [string]$p.ProcessName
-  $startTime = $null
-  try { $startTime = $p.StartTime.ToUniversalTime().ToString('o') } catch {}
-  $sessionId = 0
-  try { $sessionId = [int]$p.SessionId } catch {}
-  $results += [pscustomobject]@{
-    pid = [int]$p.Id
-    # Get-Process does not expose PPID or executable path; 0/null mean unavailable.
-    ppid = 0
-    name = $name
-    exe = $null
-    windowsSessionId = $sessionId
-    startTime = $startTime
-  }
-}
-ConvertTo-Json -InputObject @($results) -Compress -Depth 4
-`;
-
-function encodePowerShellCommand(script: string): string {
-  return Buffer.from(script, "utf16le").toString("base64");
-}
-
-function windowsPowerShellExecutable(): string {
+function windowsTasklistExecutable(): string {
   const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
   if (!systemRoot || !path.isAbsolute(systemRoot)) {
-    throw new CommandPolicyError("Windows PowerShell location is unavailable");
+    throw new CommandPolicyError("Windows tasklist location is unavailable");
   }
-  return path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  return path.join(systemRoot, "System32", "tasklist.exe");
+}
+
+function parseCsvRow(line: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]!;
+    if (char === '"' ) {
+      if (quoted && line[index + 1] === '"' ) { field += '"' ; index += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      fields.push(field); field = "";
+    } else { field += char; }
+  }
+  fields.push(field);
+  return fields;
+}
+
+export function parseTaskListCsv(output: string): readonly ProcessInfo[] {
+  const results: ProcessInfo[] = [];
+  for (const line of output.split(/\r?\n/u).map((value) => value.trim()).filter((value) => value.startsWith('"'))) {
+    const [name, pidText, , sessionText] = parseCsvRow(line);
+    const pid = Number(pidText);
+    const sessionId = Number(sessionText);
+    if (!name || !Number.isSafeInteger(pid) || pid <= 0) continue;
+    results.push({
+      pid,
+      // tasklist does not report parent PID, executable path, or start time.
+      ppid: 0,
+      name,
+      windowsSessionId: Number.isSafeInteger(sessionId) && sessionId >= 0 ? sessionId : 0,
+    });
+  }
+  return results;
 }
 
 export interface ProcessInfo {
@@ -62,33 +58,6 @@ export interface ProcessInfo {
   readonly owner?: string;
   readonly windowsSessionId: number;
   readonly startTime?: string;
-}
-
-function parseProcessInfo(value: unknown): ProcessInfo {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new CommandPolicyError("Process inspection returned invalid data");
-  }
-  const record = value as Record<string, unknown>;
-  const pid = Number(record.pid);
-  const ppid = Number(record.ppid);
-  const windowsSessionId = Number(record.windowsSessionId);
-  const name = record.name;
-  if (!Number.isSafeInteger(pid) || pid <= 0 || !Number.isSafeInteger(ppid) || ppid < 0 ||
-      !Number.isSafeInteger(windowsSessionId) || windowsSessionId < 0 || typeof name !== "string" || !name) {
-    throw new CommandPolicyError("Process inspection returned invalid data");
-  }
-  const exe = record.exe;
-  const owner = record.owner;
-  const startTime = record.startTime;
-  return {
-    pid,
-    ppid,
-    name,
-    ...(typeof exe === "string" && exe.length > 0 ? { exe } : {}),
-    ...(typeof owner === "string" && owner.length > 0 ? { owner } : {}),
-    windowsSessionId,
-    ...(typeof startTime === "string" && startTime.length > 0 ? { startTime } : {}),
-  };
 }
 
 export class ProcessInspector {
@@ -145,21 +114,14 @@ export class ProcessInspector {
 
   private async query(kind: "name" | "pid", value: string, signal?: AbortSignal): Promise<readonly ProcessInfo[]> {
     const limits = DEFAULT_COMMAND_LIMITS["process-inspect"];
-    const executable = windowsPowerShellExecutable();
+    const executable = windowsTasklistExecutable();
     const env = createSanitizedChildEnv(process.execPath, [path.dirname(executable)]);
-    env.MCP_BRIDGE_PROCESS_QUERY_KIND = kind;
-    env.MCP_BRIDGE_PROCESS_QUERY_VALUE = value;
+    const filter = kind === "pid"
+      ? "PID eq " + value
+      : "IMAGENAME eq " + (value.toLowerCase().endsWith(".exe") ? value : value + ".exe");
     const command: PlannedCommand = {
       executable,
-      args: [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-EncodedCommand",
-        encodePowerShellCommand(WINDOWS_PROCESS_QUERY_SCRIPT),
-      ],
+      args: ["/FO", "CSV", "/NH", "/FI", filter],
       cwd: path.dirname(executable),
       env,
       shell: false,
@@ -178,15 +140,8 @@ export class ProcessInspector {
     if (result.outcome !== "completed" || result.exitCode !== 0 || result.truncated) {
       throw new CommandPolicyError("Process inspection failed");
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(result.stdout || "[]") as unknown;
-    } catch {
-      throw new CommandPolicyError("Process inspection returned invalid JSON");
-    }
-    if (!Array.isArray(parsed)) throw new CommandPolicyError("Process inspection returned invalid data");
+    const parsed = parseTaskListCsv(result.stdout);
     if (parsed.length > MAX_PROCESS_RESULTS) throw new CommandPolicyError("Process inspection returned too many results");
-    return parsed.map(parseProcessInfo);
+    return parsed;
   }
 }
-
