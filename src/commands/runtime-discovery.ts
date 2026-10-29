@@ -59,6 +59,10 @@ export function createSanitizedChildEnv(
     if (value !== undefined) env[key] = value;
   }
 
+  // CI is a non-secret execution mode used by package managers to avoid
+  // interactive prompts in headless runners. Preserve only explicit truthy values.
+  if (source.CI === "true" || source.CI === "1") env.CI = source.CI;
+
   const nodeDirectory = path.dirname(nodeExecutable);
   const inheritedPath = process.platform === "win32"
     ? (source.Path ?? source.PATH)

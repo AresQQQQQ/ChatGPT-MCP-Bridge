@@ -293,7 +293,7 @@ test("Express endpoint completes MCP handshake and exposes the file tools", asyn
           name: "inspect_process",
           arguments: { workspaceId: "demo", pid: process.pid },
         });
-        assert.equal(inspected.isError, undefined);
+        assert.equal(inspected.isError, undefined, JSON.stringify(inspected));
         const inspectedStructured = inspected.structuredContent as { found?: boolean; process?: { pid?: number; name?: string } };
         assert.equal(inspectedStructured.found, true);
         assert.equal(inspectedStructured.process?.pid, process.pid);

@@ -62,6 +62,23 @@ test("exec command schema rejects arbitrary command, args, and env fields", () =
   );
 });
 
+test("sanitized child environment preserves CI mode without forwarding secrets", () => {
+  const previousCi = process.env.CI;
+  const previousToken = process.env.CONTROL_PLANE_API_KEY;
+  process.env.CI = "true";
+  process.env.CONTROL_PLANE_API_KEY = "secret-fixture";
+  try {
+    const env = createSanitizedChildEnv();
+    assert.equal(env.CI, "true");
+    assert.equal(env.CONTROL_PLANE_API_KEY, undefined);
+  } finally {
+    if (previousCi === undefined) delete process.env.CI;
+    else process.env.CI = previousCi;
+    if (previousToken === undefined) delete process.env.CONTROL_PLANE_API_KEY;
+    else process.env.CONTROL_PLANE_API_KEY = previousToken;
+  }
+});
+
 test("planner creates shell-free allowlisted package-script commands", async () => {
   const root = await temporaryDirectory("mcp-bridge-command-planner-");
   try {
