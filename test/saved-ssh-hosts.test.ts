@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { SavedSshHostManager } from "../src/terminal/saved-ssh-hosts.js";
+import { SavedSshHostManager, SshHostKeyTrustError, SshHostKeyTrustManager } from "../src/terminal/saved-ssh-hosts.js";
 import { TerminalSessionManager } from "../src/terminal/terminal-sessions.js";
 import { WindowsCredentialVault, type CredentialVault } from "../src/terminal/windows-credential-vault.js";
 
@@ -50,6 +50,46 @@ class FakePty {
     for (const listener of this.exits) listener({ exitCode: 0 });
   }
 }
+
+test("SSH first connection trusts an unknown key once and rejects later key changes", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-tofu-test-"));
+  const knownHostsPath = path.join(dir, ".ssh", "known_hosts");
+  const firstKey = Buffer.from("test-ed25519-public-key-one").toString("base64");
+  const changedKey = Buffer.from("test-ed25519-public-key-two").toString("base64");
+  let scanOutput = "192.0.2.31 ssh-ed25519 " + firstKey + "\n";
+  const trust = new SshHostKeyTrustManager({
+    knownHostsPath,
+    scanKeys: async () => scanOutput,
+    lookupKnownHosts: async (target, file) => {
+      try {
+        const text = await readFile(file, "utf8");
+        return text.split(String.fromCharCode(10)).filter(line => line.startsWith(target + " ")).join(String.fromCharCode(10));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+        throw error;
+      }
+    },
+  });
+  try {
+    await trust.ensureTrusted("192.0.2.31", 22);
+    let saved = await readFile(knownHostsPath, "utf8");
+    assert.equal(saved.trim(), "192.0.2.31 ssh-ed25519 " + firstKey);
+    await trust.ensureTrusted("192.0.2.31", 22);
+    saved = await readFile(knownHostsPath, "utf8");
+    assert.equal(saved.trim().split(String.fromCharCode(10)).length, 1);
+
+    scanOutput = "192.0.2.31 ssh-ed25519 " + changedKey + "\n";
+    await assert.rejects(trust.ensureTrusted("192.0.2.31", 22), (error: unknown) => {
+      assert.ok(error instanceof SshHostKeyTrustError);
+      assert.match((error as Error).message, /指纹已变化/u);
+      return true;
+    });
+    saved = await readFile(knownHostsPath, "utf8");
+    assert.equal(saved.trim(), "192.0.2.31 ssh-ed25519 " + firstKey);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("global SSH host CRUD stores passwords only in the injected credential vault", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-global-hosts-"));
@@ -124,10 +164,31 @@ test("SSH aliases persist across Bridge restarts without storing plaintext passw
   }
 });
 
+test("saved SSH connection stops before launching a terminal when host-key trust rejects the target", { skip: process.platform !== "win32" && process.platform !== "darwin" }, async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-trust-block-test-"));
+  const vault = new FakeVault();
+  let terminalStarted = false;
+  const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "unused", {
+    ensureTrusted: async () => { throw new SshHostKeyTrustError("SSH 主机指纹已变化"); },
+  });
+  const terminals = new TerminalSessionManager(async () => {
+    terminalStarted = true;
+    throw new Error("Terminal must not start if trust check fails");
+  });
+  try {
+    await saved.saveGlobalFromUi({ hostId:"pve", host:"192.0.2.31", username:"root", port:22, password:"test-secret" });
+    await assert.rejects(saved.connect("trusted-workspace", dir, "pve", terminals), /指纹已变化/u);
+    assert.equal(terminalStarted, false);
+  } finally {
+    terminals.close();
+    await rm(dir, { recursive:true, force:true });
+  }
+});
+
 test("saved SSH connects through native ssh.exe and injects the secret only into the PTY after a verified prompt", { skip: process.platform !== "win32" }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-login-test-"));
   const vault = new FakeVault();
-  const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "secret-for-test");
+  const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "secret-for-test", { ensureTrusted: async () => undefined });
   const pty = new FakePty();
   let launch = { executable: "", args: [] as string[] };
   const terminals = new TerminalSessionManager(async (executable, args) => {
@@ -157,7 +218,7 @@ test("saved SSH connects through native ssh.exe and injects the secret only into
 test("saved SSH connects through native OpenSSH on macOS and injects the Keychain secret only after a password prompt", { skip: process.platform !== "darwin" }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ssh-mac-login-test-"));
   const vault = new FakeVault();
-  const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "unused");
+  const saved = new SavedSshHostManager(path.join(dir, "hosts.json"), vault, async () => "unused", { ensureTrusted: async () => undefined });
   const pty = new FakePty();
   let launch = { executable: "", args: [] as string[] };
   const terminals = new TerminalSessionManager(async (executable, args) => {

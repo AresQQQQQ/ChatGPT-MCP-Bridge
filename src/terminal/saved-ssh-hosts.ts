@@ -1,7 +1,10 @@
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { isIP } from "node:net";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 
 import { promptForLocalPassword } from "./local-password-prompt.js";
 import { TerminalSessionManager, type TerminalView } from "./terminal-sessions.js";
@@ -53,6 +56,154 @@ const HOST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const USERNAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/u;
 const DOMAIN_NAME_PATTERN = /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/u;
+const execFileAsync = promisify(execFile);
+const SSH_KEY_TYPE_PATTERN = /^(?:ssh-|ecdsa-|sk-)[A-Za-z0-9@._+-]{1,100}$/u;
+
+interface ScannedSshKey { readonly keyType: string; readonly key: string; readonly fingerprint: string }
+
+function knownHostTarget(host: string, port: number): string {
+  return port === 22 ? host : "[" + host + "]:" + port;
+}
+
+export class SshHostKeyTrustError extends SavedSshHostError {}
+
+export interface SshHostKeyTrustOptions {
+  readonly knownHostsPath?: string;
+  readonly scanKeys?: (host: string, port: number) => Promise<string>;
+  readonly lookupKnownHosts?: (target: string, file: string) => Promise<string>;
+}
+
+export class SshHostKeyTrustManager {
+  private readonly knownHostsPath: string;
+  private readonly scanKeysOverride?: SshHostKeyTrustOptions["scanKeys"];
+  private readonly lookupKnownHostsOverride?: SshHostKeyTrustOptions["lookupKnownHosts"];
+  private static readonly queues = new Map<string, Promise<void>>();
+
+  public constructor(options: SshHostKeyTrustOptions = {}) {
+    this.knownHostsPath = path.resolve(options.knownHostsPath ?? path.join(homedir(), ".ssh", "known_hosts"));
+    this.scanKeysOverride = options.scanKeys;
+    this.lookupKnownHostsOverride = options.lookupKnownHosts;
+  }
+
+  private locked<T>(fn: () => Promise<T>): Promise<T> {
+    const key = path.resolve(this.knownHostsPath);
+    const previous = SshHostKeyTrustManager.queues.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const tail = previous.then(() => gate);
+    SshHostKeyTrustManager.queues.set(key, tail);
+    return previous.then(fn, fn).finally(() => {
+      release();
+      if (SshHostKeyTrustManager.queues.get(key) === tail) SshHostKeyTrustManager.queues.delete(key);
+    });
+  }
+
+  private async scan(host: string, port: number): Promise<ScannedSshKey[]> {
+    let output = "";
+    if (this.scanKeysOverride) output = await this.scanKeysOverride(host, port);
+    else {
+      const executable = process.platform === "win32" ? "ssh-keyscan.exe" : "/usr/bin/ssh-keyscan";
+      try {
+        const result = await execFileAsync(executable, ["-T", "5", "-p", String(port), host], {
+          encoding: "utf8", timeout: 12_000, maxBuffer: 64 * 1024, windowsHide: true,
+        });
+        output = result.stdout;
+      } catch (error) {
+        output = String((error as { stdout?: string }).stdout ?? "");
+      }
+    }
+    const keys = new Map<string, ScannedSshKey>();
+    for (const line of output.split(/\r?\n/u)) {
+      const fields = line.trim().split(/\s+/u);
+      const keyType = fields[1];
+      const encodedKey = fields[2];
+      if (!keyType || !encodedKey || !SSH_KEY_TYPE_PATTERN.test(keyType) || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encodedKey)) continue;
+      const blob = Buffer.from(encodedKey, "base64");
+      if (!blob.length || blob.toString("base64").replace(/=+$/u, "") !== encodedKey.replace(/=+$/u, "")) continue;
+      const fingerprint = "SHA256:" + createHash("sha256").update(blob).digest("base64").replace(/=+$/u, "");
+      keys.set(keyType + ":" + encodedKey, { keyType, key: encodedKey, fingerprint });
+    }
+    if (!keys.size) throw new SshHostKeyTrustError("无法获取 SSH 主机指纹。请检查地址、端口和 SSH 服务。");
+    return [...keys.values()].slice(0, 12);
+  }
+
+  private async lookup(target: string): Promise<Array<{ keyType: string; key: string }>> {
+    let output = "";
+    if (this.lookupKnownHostsOverride) output = await this.lookupKnownHostsOverride(target, this.knownHostsPath);
+    else {
+      try { await readFile(this.knownHostsPath, "utf8"); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw new SshHostKeyTrustError("无法读取本机 SSH 主机信任记录。");
+      }
+      const executable = process.platform === "win32" ? "ssh-keygen.exe" : "/usr/bin/ssh-keygen";
+      try {
+        const result = await execFileAsync(executable, ["-F", target, "-f", this.knownHostsPath], {
+          encoding: "utf8", timeout: 8_000, maxBuffer: 64 * 1024, windowsHide: true,
+        });
+        output = result.stdout;
+      } catch (error) {
+        const code = (error as { code?: number | string }).code;
+        if (code === 1 || code === "1") return [];
+        throw new SshHostKeyTrustError("无法检查本机 SSH 主机信任记录。");
+      }
+    }
+    const keys: Array<{ keyType: string; key: string }> = [];
+    for (const line of output.split(/\r?\n/u)) {
+        const fields = line.trim().split(/\s+/u);
+        if (fields.length >= 3 && fields[1] && fields[2] && SSH_KEY_TYPE_PATTERN.test(fields[1])) keys.push({ keyType: fields[1], key: fields[2] });
+      }
+    return keys;
+  }
+
+  public async ensureTrusted(host: string, port: number): Promise<void> {
+    const target = knownHostTarget(host, port);
+    await this.locked(async () => {
+      const scanned = await this.scan(host, port);
+      const known = await this.lookup(target);
+      const knownByType = new Map<string, Set<string>>();
+      for (const entry of known) {
+        const values = knownByType.get(entry.keyType) ?? new Set<string>();
+        values.add(entry.key);
+        knownByType.set(entry.keyType, values);
+      }
+
+      let matchingExistingKey = false;
+      for (const candidate of scanned) {
+        const existing = knownByType.get(candidate.keyType);
+        if (!existing) continue;
+        if (!existing.has(candidate.key)) {
+          throw new SshHostKeyTrustError("SSH 主机指纹已变化（当前 " + candidate.keyType + " 指纹：" + candidate.fingerprint + "），已拒绝连接。请先通过可信渠道核实新指纹，再手动更新 known_hosts。");
+        }
+        matchingExistingKey = true;
+      }
+      if (known.length > 0 && !matchingExistingKey) {
+        throw new SshHostKeyTrustError("已有 SSH 主机信任记录，但当前指纹不匹配，已拒绝自动信任。请核实设备身份后再更新记录。");
+      }
+
+      const additions = scanned
+        .filter(candidate => !knownByType.get(candidate.keyType)?.has(candidate.key))
+        .map(candidate => target + " " + candidate.keyType + " " + candidate.key);
+      if (!additions.length) return;
+
+      await mkdir(path.dirname(this.knownHostsPath), { recursive: true, mode: 0o700 });
+      let current = "";
+      try { current = await readFile(this.knownHostsPath, "utf8"); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new SshHostKeyTrustError("无法读取本机 SSH 主机信任记录。");
+      }
+      const lines = new Set(current.split(/\r?\n/u).filter(Boolean));
+      const unique = additions.filter(line => !lines.has(line));
+      if (unique.length) {
+        await appendFile(this.knownHostsPath, (current && !current.endsWith("\n") ? "\n" : "") + unique.join("\n") + "\n", { encoding: "utf8", mode: 0o600 });
+      }
+      if (process.platform !== "win32") {
+        await chmod(path.dirname(this.knownHostsPath), 0o700);
+        await chmod(this.knownHostsPath, 0o600);
+      }
+    });
+  }
+}
 
 function verifyIdentity(host: SavedSshHost): void {
   if (!WORKSPACE_ID_PATTERN.test(host.workspaceId) || !HOST_ID_PATTERN.test(host.hostId)) {
@@ -120,6 +271,7 @@ export class SavedSshHostManager {
     private readonly stateFile: string,
     private readonly vault: CredentialVault = defaultCredentialVault(stateFile),
     private readonly prompt: PasswordEntry = promptForLocalPassword,
+    private readonly hostKeyTrust: Pick<SshHostKeyTrustManager, "ensureTrusted"> = new SshHostKeyTrustManager(),
   ) {}
 
   private async initialize(): Promise<void> {
@@ -362,6 +514,8 @@ export class SavedSshHostManager {
     if (!(await this.vault.exists(globalCredentialTarget(host.hostId)))) {
       throw new SavedSshHostError("SSH password is not saved in the local credential vault");
     }
+    // Trust-on-first-use: only the first connection adds keys. Existing mismatches fail closed.
+    await this.hostKeyTrust.ensureTrusted(host.host, host.port);
     const destination = isIP(host.host) === 6 ? host.username + "@[" + host.host + "]" : host.username + "@" + host.host;
     const session = await sessions.start(workspaceId, workspaceRoot, {
       executable: process.platform === "win32" ? "ssh.exe" : "/usr/bin/ssh",

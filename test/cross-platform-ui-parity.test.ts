@@ -46,6 +46,7 @@ test("cross-platform parity matrix records UI, API, and platform-service gaps", 
   assert.match(matrix, /Codex 默认模型 \/ 推理等级/u);
   assert.match(matrix, /SSH 主机 CRUD/u);
   assert.match(matrix, /MacKeychainVault/u);
-  assert.match(matrix, /已实现（待首次真实 Keychain 使用验收）/u);
+  assert.match(matrix, /SSH 首次主机密钥信任/u);
+  assert.match(matrix, /已对齐（TOFU）/u);
   assert.match(matrix, /验收原则/u);
 });
