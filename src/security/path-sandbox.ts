@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -162,6 +163,23 @@ function getPlatform(platform?: SandboxPlatform): SandboxPlatform {
   return platform ?? (process.platform === "win32" ? "win32" : "posix");
 }
 
+function getCanonicalTempRoot(platform: SandboxPlatform): string {
+  const p = getPathApi(platform);
+  const lexical = p.normalize(tmpdir());
+  if (platform !== getPlatform()) return lexical;
+
+  try {
+    let canonical = realpathSync.native(tmpdir());
+    if (platform === "win32") {
+      if (canonical.startsWith("\\\\?\\UNC\\")) canonical = `\\\\${canonical.slice(8)}`;
+      else if (canonical.startsWith("\\\\?\\")) canonical = canonical.slice(4);
+    }
+    return p.normalize(canonical);
+  } catch {
+    return lexical;
+  }
+}
+
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
@@ -217,7 +235,7 @@ function isSensitiveAbsolutePath(candidate: string, platform: SandboxPlatform): 
 
   const lower = normalized.toLowerCase();
   const withoutDrive = lower.replace(/^[a-z]:/u, "");
-  const normalizedTemp = p.normalize(tmpdir()).toLowerCase();
+  const normalizedTemp = getCanonicalTempRoot(platform).toLowerCase();
   if (lower === normalizedTemp || lower.startsWith(`${normalizedTemp}\\`)) {
     return false;
   }
@@ -243,7 +261,7 @@ function isSensitiveAbsolutePath(candidate: string, platform: SandboxPlatform): 
 function isBlockedRootPath(candidate: string, platform: SandboxPlatform): boolean {
   const p = getPathApi(platform);
   const normalized = p.normalize(candidate);
-  const normalizedTemp = p.normalize(tmpdir());
+  const normalizedTemp = getCanonicalTempRoot(platform);
   if (isContainedInternal(normalizedTemp, normalized, platform)) {
     return isBlockedWorkspacePath(p.relative(normalizedTemp, normalized));
   }

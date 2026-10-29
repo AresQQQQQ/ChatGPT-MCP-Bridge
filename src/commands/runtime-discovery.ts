@@ -114,10 +114,10 @@ function pathEntries(): readonly string[] {
     : (process.env.PATH ?? process.env.Path ?? "");
   const seen = new Set<string>();
   const result: string[] = [];
-  // bridge-ui.cmd may start an absolute fallback Node executable whose
-  // directory is not present in the inherited PATH. Search that trusted
-  // runtime directory as well so adjacent package-manager shims remain usable.
-  for (const item of [path.dirname(process.execPath), ...raw.split(path.delimiter)]) {
+  // Prefer the package manager explicitly selected by PATH (including CI setup actions).
+  // The Node executable directory is a fallback for bridge-ui.cmd launches that use
+  // an absolute Node runtime whose adjacent package-manager shims are not on PATH.
+  for (const item of [...raw.split(path.delimiter), path.dirname(process.execPath)]) {
     if (!item || !path.isAbsolute(item)) continue;
     const normalized = path.normalize(item);
     const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;

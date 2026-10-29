@@ -76,7 +76,7 @@ test("MCP end to end: open, read, run, patch, and inspect git diff", async () =>
       name: "exec_command",
       arguments: { workspaceId: "demo", kind: "test" },
     });
-    assert.equal(command.isError, undefined);
+    assert.equal(command.isError, undefined, JSON.stringify(command));
     assert.match(command.content[0]?.type === "text" ? command.content[0].text : "", /e2e-command-ok/u);
 
     const failedCommand = await client.callTool({

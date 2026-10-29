@@ -235,7 +235,7 @@ test("MCP tools expose usable exec union and consistent text/structured results"
       name: "exec_command",
       arguments: { workspaceId: "demo", kind: "test" },
     });
-    assert.equal(validExec.isError, undefined);
+    assert.equal(validExec.isError, undefined, JSON.stringify(validExec));
     assert.match(validExec.content[0]?.type === "text" ? validExec.content[0].text : "", /contract-test-ok/u);
     assert.match(String(asObject(validExec.structuredContent).stdout), /(?:^|\n)contract-test-ok(?:\n|$)/u);
 
