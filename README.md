@@ -46,13 +46,12 @@ pnpm build
 
 ### 第 3 步：启动桌面 UI，并在 UI 中配置 Tunnel
 
-**正常使用优先通过桌面 UI 内置的「连接向导」配置，不需要先运行 `pnpm run setup`。** `pnpm run setup` 是独立的终端启动入口，主要用于手动安装、诊断或在桌面 UI 不可用时使用；它不是日常操作的必经步骤。
+启动桌面控制台：
 
-**Windows：** 双击项目根目录的 `bridge-ui.cmd`。
+- **Windows：** 双击项目根目录的 `bridge-ui.cmd`。
+- **macOS：** 双击项目根目录的 `bridge-ui.command`。首次运行会按需安装依赖、构建原生 UI，并生成 Finder 可见的 `ChatGPT MCP Bridge.app`；之后也可以直接打开该 `.app`。
 
-**macOS：** 双击项目根目录的 `bridge-ui.command`。首次运行会按需安装依赖、构建原生 UI，并生成 Finder 可见的 `ChatGPT MCP Bridge.app`；之后也可以直接打开该 `.app`。
-
-在桌面 UI 中点击「连接向导」，按提示填写 Tunnel ID、Runtime API key 和健康检查端口。向导会下载、校验并配置所需的官方 Tunnel 客户端。保存后回到主界面，先不要启动服务；下一步先添加工作区。
+控制台打开后，点击「连接向导」，按提示填写 Tunnel ID、Runtime API key 和健康检查端口。向导会下载、校验并配置所需的官方 Tunnel 客户端。保存后回到主界面，先不要启动服务；下一步先添加工作区。
 
 准备以下两项：
 
