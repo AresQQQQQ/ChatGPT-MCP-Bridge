@@ -173,6 +173,7 @@ Bridge 默认监听 `127.0.0.1:3000`，不要直接将本地 HTTP 服务暴露�
 
 ## 进阶文档
 
+- [更新日志](CHANGELOG.md)
 - [手动配置与维护](docs/SETUP.md)
 - [工具、配置和安全参考](docs/REFERENCE.md)
 - [交互式终端与 SSH 凭据](docs/INTERACTIVE-TERMINAL.md)
