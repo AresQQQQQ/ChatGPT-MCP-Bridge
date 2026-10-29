@@ -1,14 +1,35 @@
 # ChatGPT MCP Bridge
 
-让 ChatGPT 通过 MCP 读取和编辑本地项目、检查 Git 差异、运行允许的开发脚本，并可选接入 Codex Desktop。
+一个面向本地开发工作流的跨平台 MCP Bridge，让 ChatGPT 通过受控的 MCP 工具访问你明确配置的项目目录，并可选接入 Codex Desktop。Windows 使用原生 WPF 控制台；macOS 使用原生 AppKit + WebKit 控制台。两端共享核心业务、配置模型和 MCP 工具，平台差异由各自的桌面与凭据适配层处理。
 
-本仓库只发布 Bridge 自身，**不包含你的工作区配置、密钥、项目内容或热挂载的外部 MCP**。这是社区项目，与 OpenAI 官方产品分开维护。
+本项目是社区维护的独立工具，并非 OpenAI 官方产品。仓库只包含 Bridge 源码与公开资源，**不会包含你的工作区配置、API 密钥、SSH 密码、项目内容或本机运行状态**。
 
-[准备连接信息](#准备连接信息) · [安装启动](#安装启动) · [连接 ChatGPT](#连接-chatgpt) · [配置 ChatGPT 项目](#配置-chatgpt-项目) · [常见问题](#常见问题) · [手动配置](docs/SETUP.md) · [技术参考](docs/REFERENCE.md)
+[功能概览](#功能概览) · [准备连接信息](#准备连接信息) · [安装启动](#安装启动) · [连接 ChatGPT](#连接-chatgpt) · [配置 ChatGPT 项目](#配置-chatgpt-项目) · [更新](#统一版本更新) · [常见问题](#常见问题) · [手动配置](docs/SETUP.md) · [技术参考](docs/REFERENCE.md)
 
 ```text
-ChatGPT 项目 → Bridge 应用 → Secure MCP Tunnel → 本机 Bridge → 指定的项目目录
+ChatGPT 项目 → ChatGPT 自定义 MCP 插件 → Secure MCP Tunnel → 本机 Bridge → 已配置的工作区
 ```
+
+## 功能概览
+
+| 功能 | 说明 |
+| --- | --- |
+| 跨平台桌面控制台 | Windows 原生 WPF；macOS 原生 AppKit/WebKit。可启动、停止服务，管理工作区、查看状态与日志。 |
+| 工作区与权限模式 | 配置多个本地项目，按工作区 ID 路由工具调用；支持 `readonly`、`workspace`、`trusted-dev` 和 `handoff` 模式。 |
+| MCP 管理 | 查看工作区配置的本地 MCP，检查可用性、工具数量、延迟与错误，并执行加载/卸载。控制台提供全局 MCP 总览及工作区级详情。 |
+| Codex Desktop 集成 | 查看 Codex 绑定、Threads 与任务状态；支持相关任务操作和可配置的默认模型/推理等级。具体能力取决于本机 Codex 环境与启用配置。 |
+| SSH 主机管理 | 全局管理 SSH 主机别名、地址、端口、用户名与凭据状态。Windows 使用 Credential Manager，macOS 使用 Keychain；密码不会写入 Bridge 配置或返回给 MCP。 |
+| 交互式终端 | 在 `trusted-dev` 工作区权限范围内使用持久终端会话；支持保存的 SSH 凭据与平台原生 OpenSSH。 |
+| 本地连接向导 | 配置 Tunnel ID、Runtime API key 和本机端口；向导不代替用户在 ChatGPT 中创建自定义 MCP 插件。 |
+| 安全与维护 | Tunnel 认证、工作区权限检查、命令参数校验、配置并发保护、启动诊断，以及 Windows/macOS CI。 |
+
+**SSH 首次连接说明：** `ssh_start_saved` 对尚未记录的主机采用 TOFU（首次使用时信任）：自动扫描并保存首次看到的主机公钥，后续连接严格校验；如果已信任的密钥发生变化，会拒绝连接而不会自动覆盖。TOFU 方便连接自管设备，但不会独立验证首次扫描到的密钥是否真实属于目标设备，请仅在理解该风险后使用。
+
+## 支持的平台
+
+- **Windows x64 / ARM64**：Node.js 22+、Git、pnpm；使用原生 WPF 控制台。
+- **macOS Apple Silicon / arm64**：Node.js 22+、Git、pnpm、Xcode Command Line Tools；使用原生 AppKit/WebKit 控制台。Keychain helper 首次使用时在本机编译。
+- CI 会分别在 Windows x64 与 macOS Apple Silicon 上执行类型检查、自动化测试和构建。Linux 可参考手动配置运行非桌面工作流，但本 README 的原生桌面 UI 不面向 Linux。
 
 ## 准备连接信息
 
@@ -37,7 +58,7 @@ ChatGPT 项目 → Bridge 应用 → Secure MCP Tunnel → 本机 Bridge → 指
 
 ### 1. 安装并运行向导
 
-自动向导支持 **Windows x64 / ARM64 和 macOS Apple Silicon / arm64**。准备 Node.js 22+、Git 和 pnpm；没有 pnpm 时先运行 `npm install -g pnpm`。其他系统可参考[手动配置](docs/SETUP.md)。
+自动向导支持 **Windows x64 / ARM64 和 macOS Apple Silicon / arm64**。准备 Node.js 22+、Git 和 pnpm；没有 pnpm 时先运行 `npm install -g pnpm`。macOS 还需要 Xcode Command Line Tools，以构建原生 UI 和首次使用时的 Keychain helper。其他系统可参考[手动配置](docs/SETUP.md)。
 
 ```powershell
 git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
@@ -71,7 +92,7 @@ macOS users can also double-click setup.command in Finder.
 | --- | --- |
 | `id` | 自定义工作区标识；后续工具调用中的 `workspaceId` 必须与它一致 |
 | `root` | 本机已存在的项目目录；Windows 路径建议使用 `/` |
-| `mode` | `workspace` 允许受控读写，`readonly` 只读 |
+| `mode` | `readonly` 只读；`workspace` 允许工作区范围内的受控读写；`trusted-dev` 允许更多本机开发操作；`handoff` 用于受控交接流程 |
 | `allowedScripts` | 允许执行的 `package.json` 脚本名；非 Node 项目可设为 `[]` |
 
 初始的 `default` / `.` 指向 Bridge 自身，使用前请改成目标项目。多个项目可添加不同 `id` 的条目。需要通用命令执行时才启用 `trusted-dev`，它以当前用户身份执行代码，不是操作系统沙箱。
@@ -87,9 +108,9 @@ node dist/cli.js doctor
 
 ### macOS Apple Silicon
 
-Mac 版源码位于统一跨平台分支。在 macOS Terminal 中克隆仓库：
+macOS 与 Windows 现在使用同一个 `main` 主线。在 macOS Terminal 中克隆仓库：
 
-    git clone --branch integration/windows-macos-unified https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
+    git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
     cd ChatGPT-MCP-Bridge
 
 确保已安装 Node.js 22+、pnpm 和 Xcode Command Line Tools。首次使用直接双击项目根目录的 bridge-ui.command，或在 Terminal 运行 ./bridge-ui.command。它会在依赖缺失时安装锁定依赖，并在 UI 构建产物缺失或过期时自动构建，然后打开原生控制台。首次成功构建后，Finder 中会出现 ChatGPT MCP Bridge.app；以后可直接双击这个应用启动。
@@ -142,8 +163,10 @@ Windows 与 macOS 都从 GitHub main 更新。先停止本机 Bridge/Tunnel；�
 
 脚本仅接受 main 分支和干净的源码工作树，执行 git fetch、检查本地/远端提交关系，并只允许 fast-forward 到 origin/main。依赖清单变更时执行 pnpm install --frozen-lockfile，随后构建并运行 doctor。诊断通过后，只启动当前电脑本机配置中的 Bridge 与 Tunnel。私有配置、密钥、状态目录和 Tunnel profile 不参与源码同步。更新失败时保留错误输出，不会强制重置本地分支。
 
-GitHub Actions 在 Windows 与 Apple Silicon macOS runner 上分别运行安装、typecheck、完整测试和构建；macOS job 还会编译原生 AppKit/WebKit 控制台。
-保存的 SSH 主机现支持 Windows Credential Manager 与 macOS Keychain；两端均可通过本机 UI 管理全局主机，SSH 密码不会写入配置文件或返回给 MCP。使用 `ssh_start_saved` 首次连接时会自动记录扫描到的 SSH 主机密钥（TOFU），后续连接严格校验；若已信任的密钥变化，Bridge 会拒绝连接而不会自动覆盖。TOFU 不验证首次密钥对应的真实设备身份，请仅对自己管理且接受该风险的设备使用。macOS 首次使用 Keychain 时会在本机编译安全 helper，并可能触发系统 Keychain 授权提示。
+GitHub Actions 会在 Windows x64 与 Apple Silicon macOS runner 上分别执行依赖安装、类型检查、完整测试和构建；macOS job 还会编译原生 AppKit/WebKit 控制台。
+
+SSH 凭据由本机凭据库保存：Windows 使用 Credential Manager，macOS 使用 Keychain。密码不会写入 `mcp-bridge.json`、SSH 主机元数据、命令行参数或日志，也不会由主机管理 API 返回。macOS 首次使用 Keychain 时会在本机编译 helper，并可能触发系统 Keychain 授权提示。
+
 ## 连接 ChatGPT
 
 本地向导保存 Tunnel ID 和 Runtime API key **不会自动在 ChatGPT 创建插件**。本机 Bridge 与 Tunnel 启动并就绪后，还需完成以下步骤：
@@ -220,7 +243,8 @@ pnpm export:source
 
 - [手动配置与维护](docs/SETUP.md)：本机文件、重新配置、Codex Desktop、外部 MCP 和源码导出。
 - [技术参考](docs/REFERENCE.md)：工具、执行权限、HTTP 认证和 Codex 任务模型。
-- [交互式终端与 SSH](docs/INTERACTIVE-TERMINAL.md)：Windows PTY、终端会话、SSH 本地密码输入和安全限制。
+- [交互式终端与 SSH](docs/INTERACTIVE-TERMINAL.md)：Windows/macOS PTY、终端会话、保存的 SSH 凭据、首次主机密钥信任策略和安全限制。
+- [跨平台 UI 功能对等矩阵](docs/CROSS_PLATFORM_UI_PARITY.md)：Windows 与 macOS 的功能覆盖、平台适配边界及后续对齐原则。
 
 ## 许可证
 
