@@ -23,20 +23,18 @@ if ($kind -eq 'pid') {
 }
 $results = @()
 foreach ($p in $items) {
-  $exe = $null
-  try { $exe = [string]$p.Path } catch {}
+  # Keep process inspection fast and non-invasive: reading MainModule/Path can block on hosted runners.
   $name = [string]$p.ProcessName
-  if ($exe) { $name = [IO.Path]::GetFileName($exe) }
   $startTime = $null
   try { $startTime = $p.StartTime.ToUniversalTime().ToString('o') } catch {}
   $sessionId = 0
   try { $sessionId = [int]$p.SessionId } catch {}
   $results += [pscustomobject]@{
     pid = [int]$p.Id
-    # Get-Process does not expose PPID; 0 means unavailable. Avoid slow WMI/native compilation.
+    # Get-Process does not expose PPID or executable path; 0/null mean unavailable.
     ppid = 0
     name = $name
-    exe = if ($exe) { $exe } else { $null }
+    exe = $null
     windowsSessionId = $sessionId
     startTime = $startTime
   }
@@ -191,3 +189,4 @@ export class ProcessInspector {
     return parsed.map(parseProcessInfo);
   }
 }
+
