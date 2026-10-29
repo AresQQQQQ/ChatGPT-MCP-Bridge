@@ -1,253 +1,222 @@
 # ChatGPT MCP Bridge
 
-一个面向本地开发工作流的跨平台 MCP Bridge，让 ChatGPT 通过受控的 MCP 工具访问你明确配置的项目目录，并可选接入 Codex Desktop。Windows 使用原生 WPF 控制台；macOS 使用原生 AppKit + WebKit 控制台。两端共享核心业务、配置模型和 MCP 工具，平台差异由各自的桌面与凭据适配层处理。
+**让 ChatGPT 安全地使用你自己电脑上的开发工具和项目文件。**
 
-本项目是社区维护的独立工具，并非 OpenAI 官方产品。仓库只包含 Bridge 源码与公开资源，**不会包含你的工作区配置、API 密钥、SSH 密码、项目内容或本机运行状态**。
+ChatGPT MCP Bridge 是一个开源的本地桥接程序。它在你的电脑上运行，通过 Secure MCP Tunnel 将 ChatGPT 与你明确配置的本地工作区连接起来。你可以让 ChatGPT 读取项目、修改文件、检查 Git、运行允许的开发命令，并按需使用本地 MCP 和 Codex 集成。
 
-[功能概览](#功能概览) · [准备连接信息](#准备连接信息) · [安装启动](#安装启动) · [连接 ChatGPT](#连接-chatgpt) · [配置 ChatGPT 项目](#配置-chatgpt-项目) · [更新](#统一版本更新) · [常见问题](#常见问题) · [手动配置](docs/SETUP.md) · [技术参考](docs/REFERENCE.md)
+- **Windows**：原生 WPF 控制台，支持 x64 / ARM64。
+- **macOS**：原生 AppKit + WebKit 控制台，支持 Apple Silicon。
+- **同一主线**：Windows 和 macOS 都从 GitHub 的 `main` 分支获取更新。
 
-```text
-ChatGPT 项目 → ChatGPT 自定义 MCP 插件 → Secure MCP Tunnel → 本机 Bridge → 已配置的工作区
+本项目由社区维护，**不是 OpenAI 官方产品**。仓库不包含你的项目文件、工作区配置、Tunnel profile、API key 或 SSH 密码。
+
+## 第一次使用：按顺序完成这 5 步
+
+如果你第一次接触这个项目，不需要先理解内部架构。按下面顺序操作即可。
+
+### 第 1 步：准备环境
+
+需要：
+
+- [Node.js 22 或更高版本](https://nodejs.org/)
+- [Git](https://git-scm.com/downloads)
+- [pnpm](https://pnpm.io/installation)
+- macOS 额外需要 Xcode Command Line Tools（用于编译原生控制台和 Keychain helper）。
+
+在 macOS 上，如果尚未安装 pnpm，可以在 Terminal 执行：
+
+```sh
+npm install -g pnpm
 ```
 
-## 功能概览
+Windows 用户请使用 PowerShell 或 Windows Terminal；Mac 用户请使用 Terminal。
 
-| 功能 | 说明 |
-| --- | --- |
-| 跨平台桌面控制台 | Windows 原生 WPF；macOS 原生 AppKit/WebKit。可启动、停止服务，管理工作区、查看状态与日志。 |
-| 工作区与权限模式 | 配置多个本地项目，按工作区 ID 路由工具调用；支持 `readonly`、`workspace`、`trusted-dev` 和 `handoff` 模式。 |
-| MCP 管理 | 查看工作区配置的本地 MCP，检查可用性、工具数量、延迟与错误，并执行加载/卸载。控制台提供全局 MCP 总览及工作区级详情。 |
-| Codex Desktop 集成 | 查看 Codex 绑定、Threads 与任务状态；支持相关任务操作和可配置的默认模型/推理等级。具体能力取决于本机 Codex 环境与启用配置。 |
-| SSH 主机管理 | 全局管理 SSH 主机别名、地址、端口、用户名与凭据状态。Windows 使用 Credential Manager，macOS 使用 Keychain；密码不会写入 Bridge 配置或返回给 MCP。 |
-| 交互式终端 | 在 `trusted-dev` 工作区权限范围内使用持久终端会话；支持保存的 SSH 凭据与平台原生 OpenSSH。 |
-| 本地连接向导 | 配置 Tunnel ID、Runtime API key 和本机端口；向导不代替用户在 ChatGPT 中创建自定义 MCP 插件。 |
-| 安全与维护 | Tunnel 认证、工作区权限检查、命令参数校验、配置并发保护、启动诊断，以及 Windows/macOS CI。 |
+### 第 2 步：下载并安装项目
 
-**SSH 首次连接说明：** `ssh_start_saved` 对尚未记录的主机采用 TOFU（首次使用时信任）：自动扫描并保存首次看到的主机公钥，后续连接严格校验；如果已信任的密钥发生变化，会拒绝连接而不会自动覆盖。TOFU 方便连接自管设备，但不会独立验证首次扫描到的密钥是否真实属于目标设备，请仅在理解该风险后使用。
+在你希望保存源码的位置执行：
 
-## 支持的平台
-
-- **Windows x64 / ARM64**：Node.js 22+、Git、pnpm；使用原生 WPF 控制台。
-- **macOS Apple Silicon / arm64**：Node.js 22+、Git、pnpm、Xcode Command Line Tools；使用原生 AppKit/WebKit 控制台。Keychain helper 首次使用时在本机编译。
-- CI 会分别在 Windows x64 与 macOS Apple Silicon 上执行类型检查、自动化测试和构建。Linux 可参考手动配置运行非桌面工作流，但本 README 的原生桌面 UI 不面向 Linux。
-
-## 准备连接信息
-
-先准备下面两项，再运行安装向导。Platform 组织用于管理隧道与权限；ChatGPT 项目用于组织聊天，它们是不同的对象。
-
-### Tunnel ID 从哪里获取
-
-入口：[OpenAI Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels)。
-
-1. 登录并切换到你要使用的 Platform 组织。
-2. 创建一个隧道，或打开已有隧道，复制其 `tunnel_id`（以 `tunnel_` 开头）。
-3. 将隧道关联到实际使用的 ChatGPT 工作空间，否则它可能不会出现在 ChatGPT 的连接列表中。
-
-这个 ID 要填两处：**本地配置向导的 Tunnel ID**，以及 **ChatGPT 应用的 Tunnel 连接**。创建/管理隧道需要 Tunnels Read + Manage 权限，使用隧道需要 Read + Use。参见[官方隧道说明](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)。
-
-### Runtime API key 从哪里获取
-
-入口：[OpenAI Platform → Runtime API keys](https://platform.openai.com/settings/organization/api-keys)。
-
-1. 在同一个 Platform 组织中创建运行时 API key；创建密钥的身份需要 Tunnels Read + Use 权限。
-2. 将密钥填入**本地配置向导的 Runtime API key** 提示。向导会将它保存为本机 `.env` 中的 `CONTROL_PLANE_API_KEY`。
-
-不要使用 Admin API key，也不要把密钥填入 ChatGPT 项目指令或上传 GitHub。权限不足时联系组织管理员。
-
-## 安装启动
-
-### 1. 安装并运行向导
-
-自动向导支持 **Windows x64 / ARM64 和 macOS Apple Silicon / arm64**。准备 Node.js 22+、Git 和 pnpm；没有 pnpm 时先运行 `npm install -g pnpm`。macOS 还需要 Xcode Command Line Tools，以构建原生 UI 和首次使用时的 Keychain helper。其他系统可参考[手动配置](docs/SETUP.md)。
-
-```powershell
+```sh
 git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
 cd ChatGPT-MCP-Bridge
 pnpm install --frozen-lockfile
 pnpm build
+```
+
+这些命令在 Windows PowerShell 和 macOS Terminal 中都可使用。
+
+### 第 3 步：配置 Tunnel
+
+运行配置向导：
+
+```sh
 pnpm run setup
 ```
 
-运行 pnpm run setup 会打开原生图形化 Tunnel 配置向导（Windows 为 WPF，macOS 为 AppKit/WebKit）。填写 Tunnel ID、Runtime API key 和健康端口；已有 Runtime API key 可留空保留。也可运行 setup.cmd。
-macOS users can also double-click setup.command in Finder.
+向导会打开本机图形界面，帮助你配置 Tunnel ID、Runtime API key 和健康检查端口，并下载、校验和配置所需的官方 Tunnel 客户端。
 
-向导自动下载官方客户端、校验 SHA-256 并生成 profile。新安装会创建本机配置；已有配置保留工作区、权限和认证令牌，默认复用现有客户端。向导只完成本地设置，ChatGPT 连接在后续步骤配置。
+准备以下两项：
 
-### 2. 指定本地项目
+1. **Tunnel ID**：在 [OpenAI Platform 的 Tunnels 页面](https://platform.openai.com/settings/organization/tunnels) 创建或选择一个 Tunnel，复制它的 ID。
+2. **Runtime API key**：在同一 Platform 组织的 [API keys 页面](https://platform.openai.com/settings/organization/api-keys) 创建运行时密钥。不要使用 Admin API key。
 
-打开生成的 `mcp-bridge.json`，保留其他字段，将 `workspaces` 替换为实际项目。下面仅为字段片段：
+Tunnel 的管理权限与 ChatGPT 工作空间的使用权限是两回事。请确认 Tunnel 已关联到你准备使用的 ChatGPT 工作空间，并且你的账号具有所需的 Tunnels 权限。
 
-```json
-"workspaces": [
-  {
-    "id": "my-app",
-    "root": "D:/Projects/my-app",
-    "mode": "workspace",
-    "allowedScripts": ["test", "build", "lint", "typecheck"]
-  }
-]
-```
+> Runtime API key 供本机 Tunnel Client 连接控制平面使用。不要把它填进 ChatGPT 插件的认证栏，也不要提交到 GitHub。
+
+### 第 4 步：添加你要访问的本地项目
+
+Bridge 需要知道 ChatGPT 可以访问哪些目录。配置向导负责 Tunnel 连接；项目目录则在 Bridge 控制台的工作区管理中添加，或编辑本机生成的 `mcp-bridge.json`。
+
+每个工作区至少有三个关键字段：
 
 | 字段 | 含义 |
 | --- | --- |
-| `id` | 自定义工作区标识；后续工具调用中的 `workspaceId` 必须与它一致 |
-| `root` | 本机已存在的项目目录；Windows 路径建议使用 `/` |
-| `mode` | `readonly` 只读；`workspace` 允许工作区范围内的受控读写；`trusted-dev` 允许更多本机开发操作；`handoff` 用于受控交接流程 |
-| `allowedScripts` | 允许执行的 `package.json` 脚本名；非 Node 项目可设为 `[]` |
+| `id` | 工作区唯一 ID；ChatGPT 工具调用中的 `workspaceId` 必须使用这个值 |
+| `root` | 电脑上的项目目录绝对路径 |
+| `mode` | 这个工作区允许的操作范围 |
 
-初始的 `default` / `.` 指向 Bridge 自身，使用前请改成目标项目。多个项目可添加不同 `id` 的条目。需要通用命令执行时才启用 `trusted-dev`，它以当前用户身份执行代码，不是操作系统沙箱。
+常见权限模式：
 
-### 3. 启动服务
+- `readonly`：只读访问。
+- `workspace`：在工作区范围内进行受控读写。
+- `trusted-dev`：允许更多开发操作，例如运行开发命令和使用交互式终端。它**不是操作系统沙箱**，请只给可信的使用者。
+- `handoff`：用于受控的交接工作流。
+
+建议第一次先添加一个测试项目，并使用 `workspace` 模式。不要一开始就把整个用户目录或磁盘根目录开放给 Bridge。
+
+### 第 5 步：启动 Bridge，并在 ChatGPT 创建连接
+
+#### 启动本机 Bridge
+
+**Windows：** 双击项目目录中的 `bridge-ui.cmd` 打开控制台；也可以在终端运行：
 
 ```powershell
-node dist/cli.js doctor
-.\bridge.cmd
+.\bridge-ui.cmd
 ```
 
-等待 Bridge 和 Tunnel 两个 `READY` 状态，保持进程运行。也可用 `bridge-ui.cmd` 打开 Windows 控制窗口。两个启动脚本在缺少配置文件时都会先进入向导。
+**macOS：** 第一次使用时，双击项目根目录中的 `bridge-ui.command`。它会检查依赖，并在构建产物缺失或过期时自动构建控制台。首次成功构建后，Finder 中会出现 `ChatGPT MCP Bridge.app`，之后可以直接双击该应用启动。
 
-### macOS Apple Silicon
+在控制台中点击“启动服务”，确认 Bridge 和 Tunnel 都处于就绪状态。不要同时启动多份 Bridge，以免端口冲突。
 
-macOS 与 Windows 现在使用同一个 `main` 主线。在 macOS Terminal 中克隆仓库：
+#### 在 ChatGPT 中创建 MCP 插件
 
-    git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
-    cd ChatGPT-MCP-Bridge
+**本机配置向导不会自动创建 ChatGPT 插件。** 还需要在 ChatGPT 中手动完成一次：
 
-确保已安装 Node.js 22+、pnpm 和 Xcode Command Line Tools。首次使用直接双击项目根目录的 bridge-ui.command，或在 Terminal 运行 ./bridge-ui.command。它会在依赖缺失时安装锁定依赖，并在 UI 构建产物缺失或过期时自动构建，然后打开原生控制台。首次成功构建后，Finder 中会出现 ChatGPT MCP Bridge.app；以后可直接双击这个应用启动。
+1. 打开 [ChatGPT Plugins](https://chatgpt.com/plugins)。
+2. 点击添加入口，选择 **Add custom MCP server**。
+3. 为连接命名，例如 `ChatGPT MCP Bridge)，Connection 选择 **Tunnel**。
+4. 选择刚才配置的同一个 Tunnel，或输入相同的 Tunnel ID。
+5. 按界面要求完成认证选项并创建插件。
+6. 打开一个新对话，在输入框使用 `@` 选择该插件。
 
-如果 Finder 启动时找不到 pnpm，请先在普通 Terminal 安装 pnpm（例如 npm install -g pnpm@11.19.0），再双击 bridge-ui.command。Tunnel ID 和 Runtime API key 在 UI 连接向导中配置；已有 Tunnel 可以继续使用，无需复制 Windows profile 或 Windows 路径。
+Tunnel ID 是用来选择连接的；Runtime API key 留在本机。不要把本机的 `http://127.0.0.1:3000/mcp` 直接填写成 ChatGPT 云端连接地址。本项目使用 Tunnel 连接。
 
-将本机 `mcp-bridge.json` 的工作区改为实际 Mac 项目绝对路径；例如 Bridge 自身可用 `id: bridge-mac`、`mode: trusted-dev`，`allowedScripts: ["test", "build", "typecheck"]`（本项目没有 lint script）。
+官方说明：[在 ChatGPT 中连接自定义 MCP Server](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)。
 
-```sh
-node dist/cli.js doctor
-./bridge.command
-# 也可使用标准 CLI：
-pnpm start
-```
+## 第一次调用：确认连接正常
 
-`bridge.command` 可以在 Finder 双击，或从 Terminal 运行。它使用登录 shell 的 PATH、自动切换到项目目录，检查 Node 22+、依赖、构建和本机配置；缺少配置时提示 `pnpm run setup`。Ctrl+C 停止 Bridge 和其管理的 Tunnel。macOS 可使用 Terminal，也可使用下方的独立图形控制台。
-
-客户端从官方 ZIP 经大小及 SHA-256 校验安装，固定提取 `tunnel-client`、`cloudflared` 和运行时清单，二进制设为仅当前用户可执行。配置与运行文件位于 Git ignored 的 `.mcp-bridge-state`，具体维护与实测记录见 [macOS 设置说明](docs/SETUP.md#macos-apple-silicon)。
-
-### Mac 独立图形控制台
-
-Mac 控制台沿用 Windows 的连接链路、项目/Module 树、项目配置、Codex 绑定、本地 MCP 与日志区域，使用 AppKit 原生窗口和系统 WebKit；无需 Electron、Tauri 或额外 Web 框架。
-
-**从 GitHub 下载源码后，第一次使用请双击项目根目录的 `bridge-ui.command`。** 如果依赖或 UI 构建产物不存在，它会检查 Node.js 22+ 与 pnpm，缺少依赖时执行锁文件安装，缺少/过期的 UI 产物时自动运行构建，然后启动控制台。首次成功构建后，项目根目录就会出现 Finder 可双击的 **ChatGPT MCP Bridge.app**；之后优先直接双击这个应用即可。
-
-也可以在 Terminal 中运行：
-
-```sh
-# 一键准备依赖、构建缺失的 UI 并启动：
-./bridge-ui.command
-
-# 如需手动构建 TypeScript、原生应用、图标和签名：
-pnpm run ui:build
-# 只启动已有产物：
-pnpm run ui
-```
-
-首次构建需要本机 Xcode Command Line Tools（提供 `swiftc` 和 macOS SDK）。如果没有 pnpm，启动入口会提示安装命令；如果需要重建但应用仍在运行，入口会要求先手动退出，不会擅自关闭应用。构建完成后，Finder 中的 `ChatGPT MCP Bridge.app` 是指向本机应用包的入口；应用包与入口都在 Git 中忽略，因为它们是绑定当前机器项目路径的本地产物。首次打开会确认 Bridge 项目目录，随后记住该目录授权。
-
-在窗口中点击“启动服务”后，Bridge 与 Tunnel 由该应用管理。可停止、重新启动，并在停止状态下编辑项目配置。文件夹选择器、⌘Q 退出、⌘R 启动与 ⌘. 停止均为 Mac 原生操作；关闭应用会停止它管理的服务。启动前先停止其他 Terminal/UI 实例，避免端口冲突。
-
-应用使用本机回环控制接口，鉴权与 Tunnel profile 留在后端，日志中的实际密钥和 Tunnel ID 会隐藏。应用依赖当前项目目录和 Node 环境；移动目录后重新构建应用。详见 [Mac UI 使用与维护](docs/SETUP.md#mac-图形控制台)。
-
-## 统一版本更新
-
-Windows 与 macOS 都从 GitHub main 更新。先停止本机 Bridge/Tunnel；更新脚本不会根据端口或进程名强制结束未知进程。
-
-- Windows：运行 update-bridge.cmd。
-- macOS：运行 ./update-bridge.command。
-
-脚本仅接受 main 分支和干净的源码工作树，执行 git fetch、检查本地/远端提交关系，并只允许 fast-forward 到 origin/main。依赖清单变更时执行 pnpm install --frozen-lockfile，随后构建并运行 doctor。诊断通过后，只启动当前电脑本机配置中的 Bridge 与 Tunnel。私有配置、密钥、状态目录和 Tunnel profile 不参与源码同步。更新失败时保留错误输出，不会强制重置本地分支。
-
-GitHub Actions 会在 Windows x64 与 Apple Silicon macOS runner 上分别执行依赖安装、类型检查、完整测试和构建；macOS job 还会编译原生 AppKit/WebKit 控制台。
-
-SSH 凭据由本机凭据库保存：Windows 使用 Credential Manager，macOS 使用 Keychain。密码不会写入 `mcp-bridge.json`、SSH 主机元数据、命令行参数或日志，也不会由主机管理 API 返回。macOS 首次使用 Keychain 时会在本机编译 helper，并可能触发系统 Keychain 授权提示。
-
-## 连接 ChatGPT
-
-本地向导保存 Tunnel ID 和 Runtime API key **不会自动在 ChatGPT 创建插件**。本机 Bridge 与 Tunnel 启动并就绪后，还需完成以下步骤：
-
-1. 打开 [ChatGPT Plugins](https://chatgpt.com/plugins)，点击加号，选择 **Add custom MCP server**。
-2. 输入名称，例如 `ChatGPT MCP Bridge`；Connection 选择 **Tunnel**。
-3. 选择已创建并关联到目标 ChatGPT 工作空间的隧道，或粘贴本地向导使用的同一个 `tunnel_id`。
-4. 认证通常选择无额外认证（No authentication）；确认风险提示，然后点击 **Create as a plugin**。Tunnel Client 会按本机 Bridge 配置处理本机连接认证。
-5. 检查发现的工具；新建对话，在输入框使用 `@` 选择插件，并调用一个安全的只读工具验证。
-
-Runtime API key 只供本机 Tunnel Client 连接 OpenAI 控制平面使用，不要填入 ChatGPT 插件的认证栏。不要把本机 `http://127.0.0.1:3000/mcp` 填成云端连接地址；本教程通过 Tunnel 接入。详细步骤参见 [OpenAI 官方连接说明](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)。
-
-## 配置 ChatGPT 项目
-
-在 ChatGPT 创建项目，例如“我的应用开发”。打开项目菜单或设置，将下面模板粘贴到**项目指令**，替换应用名称及所有 `my-app`，再从项目内新建对话并启用 Bridge 应用。项目指令可供项目内聊天共享，参见[官方项目说明](https://learn.chatgpt.com/docs/projects)。
-
-对应关系是：**项目指令中的 `workspaceId` → 本地 `workspaces[].id` → `root`**。ChatGPT 项目名称只是显示名称，不会自动绑定本地目录。
-
-### 项目指令模板
-
-也可使用[独立模板文件](docs/CHATGPT-PROJECT-INSTRUCTIONS.md)。
+在 ChatGPT 中启用 Bridge 插件后，先做只读测试。你可以发送：
 
 ```text
-本项目使用的 MCP 应用：ChatGPT MCP Bridge
-本项目固定的 workspaceId：my-app
-
-处理本地代码与文件时，使用上述 Bridge 应用提供的工具。
-每次新对话首次操作项目时：
-1. 调用 get_workspace_info({"workspaceId":"my-app"})，确认工作区存在及当前权限。
-2. 调用 open_workspace({"workspaceId":"my-app"})，读取返回的项目指令。
-3. 后续需要 workspaceId 的工具调用均使用 my-app；路径填写相对项目根目录的路径。
-
-默认只处理这个工作区。找不到它时报告配置问题，不自行换到另一个项目。
-先读取相关文件再编辑，保留已有改动。代码变更后运行适用且被允许的检查，说明验证结果。
-执行命令时优先使用已允许的项目脚本或固定 Recipe；权限不足时说明所需的本地配置。
-若工具不可用或连接失败，明确报告，不编造文件内容、执行结果或成功状态。
-不要读取、输出或上传密钥及本机认证配置。
-Git 提交和推送遵循本次用户的明确要求；不要自行发布项目。
+请使用 ChatGPT MCP Bridge 检查工作区配置。
+先列出可用工作区，再打开我刚添加的工作区，确认它的根目录和权限。
+只读取项目说明并概括目录结构，不修改文件、不运行命令。
 ```
 
-### 验证配置
+如果成功，你应该看到真实的 MCP 工具调用，并且返回的工作区 ID、目录和权限与本机配置一致。
 
-在项目内发送：
+如果工具不可用，请先检查：
 
-```text
-请使用 ChatGPT MCP Bridge 列出工作区，然后打开 my-app，确认根目录与权限，
-读取项目说明并概括目录结构。只检查连接，不修改文件。
-```
+1. 本机 Bridge 和 Tunnel 是否都已启动并就绪。
+2. ChatGPT 中是否已创建并启用插件。
+3. Tunnel 是否关联到当前 ChatGPT 工作空间。
+4. 项目指令或工具调用中的 `workspaceId` 是否与本机的工作区 `id` 完全一致。
 
-应看到真实工具调用，以及正确的工作区和路径。上传 README 或模板到项目“文件/来源”只提供上下文，不会自动建立 MCP 连接或实时同步源码。
+## 你可以用它做什么？
 
-**项目指令不是权限隔离。** 同一 Bridge 下的多个工作区可能被同一应用发现；需要隔离不同用户时，使用独立的 Bridge 配置、实例与连接。
+| 功能 | 用途 |
+| --- | --- |
+| 本地项目文件 | 浏览目录、读取和编辑工作区内的文件 |
+| Git | 检查状态、查看差异，并按请求执行 Git 操作 |
+| 开发命令 | 执行工作区允许的脚本或开发命令；具体权限取决于工作区模式 |
+| 本地 MCP | 查看配置的本地 MCP，检测、加载和卸载服务 |
+| Codex Desktop | 在配置启用且本机环境可用时，查看绑定、Threads 和任务状态并执行支持的任务操作 |
+| 交互式终端与 SSH | 使用持久终端会话；管理全局 SSH 主机并调用保存的凭据 |
+| 桌面控制台 | 查看 Bridge、Tunnel、MCP、Codex 的状态与日志，管理工作区和连接设置 |
+
+### SSH 凭据与首次连接
+
+SSH 主机资料和凭据在本机管理：
+
+- Windows 将密码保存到 Windows Credential Manager。
+- macOS 将密码保存到用户 Keychain。
+- 密码不会写入 `mcp-bridge.json`、SSH 主机元数据、命令行参数或日志，也不会通过主机管理 API 返回。
+
+使用保存的主机发起 SSH 连接时，Bridge 对首次遇到的主机采用 **TOFU（首次使用时信任）**：自动扫描并记录第一次看到的主机公钥，之后严格校验。如果已信任的密钥发生变化，连接会被拒绝，不会自动覆盖旧记录。
+
+TOFU 不能独立证明首次扫描到的密钥一定属于目标设备。它适合你自己管理、且接受首次信任风险的设备；如果连接生产环境或不可信网络，请先通过可信渠道核实主机指纹。
+
+## 更新到最新版本
+
+Windows 和 macOS 都使用 GitHub 的 `main` 分支。
+
+1. 正常停止本机 Bridge 和 Tunnel。
+2. Windows 运行 `update-bridge.cmd`；macOS 运行 `./update-bridge.command`。
+3. 按脚本提示完成更新和诊断，再启动控制台。
+
+更新脚本会检查本地工作树和提交关系，只允许快进更新；如果本地有未提交改动，先保留或处理改动，不要直接覆盖。不要把本机配置、密钥和运行状态提交到 Git。
 
 ## 常见问题
 
-| 问题 | 检查方法 |
-| --- | --- |
-| 没有隧道权限或开发者模式入口 | 核对 Platform 组织权限与 ChatGPT 工作空间权限；两者分别管理 |
-| ChatGPT 找不到隧道 | 检查目标工作空间关联，以及 Tunnels Read + Use 权限 |
-| 下载失败或校验失败 | 检查 GitHub 网络访问，稍后重试或使用手动配置；安装器不会跳过校验 |
-| 工具不可用、发现失败或 401/403 | 检查两个 READY 状态、应用是否启用及本地密钥；使用组合启动以传入 Bridge 认证头 |
-| Unknown workspace 或目录错误 | 核对 `workspaceId`、`id` 和 `root`，修改本地配置后重启 Bridge |
-| 命令被拒绝 | 检查工作区模式、允许的脚本名及脚本是否实际存在 |
-| 需要重新配置或清理安装锁 | 先停止 Bridge，按[维护说明](docs/SETUP.md#本机文件与重新配置)操作 |
+### Tunnel 已就绪，但 ChatGPT 没有工具
 
-## 开发与进阶使用
+Tunnel 就绪不代表 ChatGPT 插件已经创建。请完成上面的“在 ChatGPT 中创建 MCP 插件”，并确认插件已在当前对话中启用。
 
-```powershell
-pnpm typecheck
+### ChatGPT 找不到 Tunnel
+
+检查 Tunnel 是否属于正确的 Platform 组织、是否关联目标 ChatGPT 工作空间，以及当前账号是否具有 Tunnels Read + Use 等必要权限。
+
+### 找不到工作区或目录不正确
+
+确认 ChatGPT 使用的 `workspaceId` 与 `mcp-bridge.json` 中 `workspaces[].id` 完全一致，并检查对应的 `root` 是本机真实存在的绝对路径。
+
+### 命令被拒绝
+
+检查工作区的权限模式以及允许执行的脚本。不要把 `trusted-dev` 当成隔离沙箱；它可以执行更广泛的本机开发操作。
+
+### Mac 控制台没有出现或无法启动
+
+先在普通 Terminal 确认 Node.js、pnpm 和 Xcode Command Line Tools 可用，再双击 `bridge-ui.command`。如果应用仍在运行而需要重建，请先正常退出应用，再重新运行启动入口。
+
+### SSH 首次连接失败或提示主机密钥变化
+
+首次连接会自动记录主机密钥，但这不代表密码认证一定成功。若主机密钥变化，Bridge 会拒绝连接；请先通过可信渠道核实设备身份，不要为了绕过报错而关闭严格校验或直接覆盖旧记录。
+
+## 进阶文档
+
+如果你已经完成首次连接，需要了解详细配置或排查问题，请阅读：
+
+- [手动配置、重新配置与本机文件](docs/SETUP.md)
+- [工具、权限与技术参考](docs/REFERENCE.md)
+- [交互式终端、SSH 凭据与安全限制](docs/INTERACTIVE-TERMINAL.md)
+- [Windows/macOS UI 功能对等矩阵](docs/CROSS_PLATFORM_UI_PARITY.md)
+- [ChatGPT 项目指令模板](docs/CHATGPT-PROJECT-INSTRUCTIONS.md)
+
+## 开发与测试
+
+在仓库根目录执行：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run typecheck
 pnpm test
 pnpm build
-pnpm export:source
 ```
 
-- [手动配置与维护](docs/SETUP.md)：本机文件、重新配置、Codex Desktop、外部 MCP 和源码导出。
-- [技术参考](docs/REFERENCE.md)：工具、执行权限、HTTP 认证和 Codex 任务模型。
-- [交互式终端与 SSH](docs/INTERACTIVE-TERMINAL.md)：Windows/macOS PTY、终端会话、保存的 SSH 凭据、首次主机密钥信任策略和安全限制。
-- [跨平台 UI 功能对等矩阵](docs/CROSS_PLATFORM_UI_PARITY.md)：Windows 与 macOS 的功能覆盖、平台适配边界及后续对齐原则。
+macOS 原生控制台需要构建时，执行：
 
-## 许可证
+```sh
+pnpm run ui:build
+```
 
-Copyright 2026 AresQ (AresQQQQQ).
-
-本项目采用 [Apache License 2.0](LICENSE)。第三方依赖和资源保留各自的许可证；树形图标来源见[资源说明](assets/icons/tree/SOURCES.md)。
+本项目使用 [Apache License 2.0](LICENSE)。第三方依赖及资源各自保留其适用许可证。
