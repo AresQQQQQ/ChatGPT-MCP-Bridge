@@ -118,6 +118,44 @@ test("Mac console saves API and port settings through the authenticated action A
   assert.equal(snapshot.connectionSetup.tunnelId, "tunnel_mac_settings_test");
 });
 
+test("Mac console saves Codex defaults with validation, stopped-state guard, and revision protection", async t => {
+  const f = await fixture(t);
+  const snapshot = await (await f.request("/api/snapshot")).json();
+  const response = await f.request("/api/action", {
+    action: "save-codex-defaults",
+    revision: snapshot.revision,
+    defaultModel: "gpt-6-luna",
+    defaultEffort: "high",
+  });
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json().catch(() => ({}))));
+  const saved = JSON.parse(await readFile(f.configPath, "utf8"));
+  assert.equal(saved.codex.defaultModel, "gpt-6-luna");
+  assert.equal(saved.codex.defaultEffort, "high");
+  assert.equal(saved.workspaces[0].mode, "trusted-dev");
+  const fresh = await (await f.request("/api/snapshot")).json();
+  assert.notEqual(fresh.revision, snapshot.revision);
+  assert.equal((await f.request("/api/action", {
+    action: "save-codex-defaults",
+    revision: snapshot.revision,
+    defaultModel: "gpt-6-luna",
+    defaultEffort: "medium",
+  })).status, 409);
+  assert.equal((await f.request("/api/action", {
+    action: "save-codex-defaults",
+    revision: fresh.revision,
+    defaultModel: "invalid model",
+    defaultEffort: "high",
+  })).status, 400);
+  await f.request("/api/action", { action: "start" });
+  const running = await (await f.request("/api/snapshot")).json();
+  assert.equal((await f.request("/api/action", {
+    action: "save-codex-defaults",
+    revision: running.revision,
+    defaultModel: "gpt-6-luna",
+    defaultEffort: "high",
+  })).status, 409);
+});
+
 test("Mac console protects concurrent config changes and retains workspace policies", async t => {
   const f = await fixture(t);
   const snapshot = await (await f.request("/api/snapshot")).json();

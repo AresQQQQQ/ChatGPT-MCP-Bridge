@@ -11,6 +11,7 @@
     <button id="restart" class="icon-button" title="重新启动 Bridge 与 Tunnel" aria-label="重新启动">↻</button>
     <button id="stop">停止</button>
     <button id="connection-wizard">连接向导</button>
+    <button id="local-mcp-global" type="button" aria-haspopup="dialog">本地 MCP <span id="global-mcp-count">0/0</span></button>
     <div class="settings-anchor">
       <button id="settings-toggle" aria-expanded="false" aria-controls="settings-menu">设置</button>
       <div id="settings-menu" class="settings-menu" hidden>
@@ -22,11 +23,35 @@
         <div class="settings-menu-divider"></div>
         <p class="settings-menu-caption">Codex 默认值</p>
         <p id="settings-codex-summary" class="settings-menu-note">从本机配置读取…</p>
+        <button id="settings-edit-codex-defaults" class="settings-menu-item">编辑 Codex 默认值 <span>›</span></button>
       </div>
     </div>
     <button id="start" class="primary">▶ 启动服务</button>
   </div>
 </header>
+<dialog id="global-mcp-dialog" class="setup-dialog global-mcp-dialog" aria-labelledby="global-mcp-title">
+  <section class="setup-panel panel">
+    <div class="setup-panel-heading">
+      <div><p class="eyebrow">RUNTIME REGISTRY</p><h2 id="global-mcp-title">本地 MCP 挂载总览</h2><p id="global-mcp-summary">汇总所有工作区的 MCP 配置与挂载状态。</p></div>
+      <button id="global-mcp-close" class="icon-button" aria-label="关闭本地 MCP 总览" title="关闭">×</button>
+    </div>
+    <div id="global-mcp-list" class="global-mcp-list"></div>
+  </section>
+</dialog>
+<dialog id="codex-defaults-dialog" class="setup-dialog codex-defaults-dialog" aria-labelledby="codex-defaults-title">
+  <section class="setup-panel panel">
+    <div class="setup-panel-heading"><div><p class="eyebrow">CODEX DEFAULTS</p><h2 id="codex-defaults-title">Codex 默认值</h2><p>设置全局默认模型和推理等级；保存后下次启动生效。</p></div><button id="codex-defaults-close" class="icon-button" aria-label="关闭 Codex 默认值设置" title="关闭">×</button></div>
+    <form id="codex-defaults-form" autocomplete="off">
+      <div class="setup-form-grid">
+        <label for="codex-default-model">默认模型<input id="codex-default-model" type="text" maxlength="256" placeholder="例如 gpt-6-luna" spellcheck="false" autocomplete="off" required></label>
+        <label for="codex-default-effort">推理等级<select id="codex-default-effort"><option value="none">None</option><option value="minimal">Minimal</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option><option value="max">Max</option><option value="ultra">Ultra</option></select></label>
+      </div>
+      <p id="codex-defaults-hint" class="setup-hint">请先停止 Bridge，再修改默认值。</p>
+      <div id="codex-defaults-error" class="error-message" role="alert" hidden></div>
+      <div class="setup-actions"><button id="codex-defaults-cancel" type="button">取消</button><button id="codex-defaults-save" class="primary" type="submit">保存配置</button></div>
+    </form>
+  </section>
+</dialog>
 <main>
   <section id="connection-setup-banner" class="setup-banner panel" hidden aria-live="polite">
     <div class="setup-banner-copy"><span class="setup-banner-icon" aria-hidden="true">!</span><div><h2 id="setup-banner-title">连接配置尚未完成</h2><p id="setup-banner-summary">正在检查本机配置…</p></div></div>
@@ -69,7 +94,7 @@
   </dialog>
 
   <section class="connection panel" aria-label="连接链路">
-    <div class="section-heading"><h2>连接链路</h2><div class="service-meta"><span id="lifecycle" class="badge">正在连接控制台</span><span id="runtime-meta"></span></div></div>
+    <div class="section-heading"><h2>连接链路</h2><div class="service-meta"><span id="lifecycle" class="badge">正在连接控制台</span><span id="overall-health" class="badge">正在检查状态</span><span id="runtime-meta"></span></div></div>
     <div class="chain" id="chain"></div><div id="service-error" class="error-message" hidden></div>
   </section>
   <section class="workspace-layout">

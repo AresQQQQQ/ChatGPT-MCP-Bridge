@@ -8,9 +8,9 @@ const tokenKey = "bridge-ui-session";
 let credential = location.hash.slice(1) || sessionStorage.getItem(tokenKey) || "";
 if (location.hash) { sessionStorage.setItem(tokenKey, credential); history.replaceState(null, "", "/"); }
 let snapshot, selected, selectedModule, draft, editRevision, lastSelection, activeTab = "details", localBusy = false;
-let chainSignature = "", treeSignature = "", detailsSignature = "", mcpsSignature = "";
+let chainSignature = "", treeSignature = "", detailsSignature = "", mcpsSignature = "", globalMcpsSignature = "";
 let sourceFilter = "all", clearedThrough = "", visibleLogs = [], logSignature = "", toastTimer, expired = false;
-let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, lastCommandError = "";
+let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, globalMcpOpen = false, codexDefaultsOpen = false, codexDefaultsInitialized = false, lastCommandError = "";
 
 function toast(message) { $("toast").textContent = message; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 4200); }
 async function request(route, body) {
@@ -57,6 +57,16 @@ function renderChain() {
   $("chain").innerHTML = nodes.map(([icon, title, state, tone], i) => `${i ? '<span class="chain-arrow" aria-hidden="true">›</span>' : ""}<div class="chain-node"><img src="/icons/${icon}.png" alt=""><div><h3>${title}</h3><p><i class="dot ${tone}"></i>${state}</p></div></div>`).join("");
   $("lifecycle").textContent = lifecycleLabels[s.state] || s.state;
   $("lifecycle").className = "badge" + (s.state === "running" ? " good" : ["starting","stopping"].includes(s.state) ? " warn" : "");
+  const codexReady = c.enabled === true && c.ipcConnected === true;
+  let overall = { label:"已停止", tone:"" };
+  if (s.state === "error") overall = { label:"服务异常", tone:"bad" };
+  else if (s.state === "starting") overall = { label:"启动中", tone:"warn" };
+  else if (s.state === "stopping") overall = { label:"停止中", tone:"warn" };
+  else if (s.state === "running" && s.mcp === "available" && s.tunnel === "connected" && codexReady) overall = { label:"运行正常", tone:"good" };
+  else if (s.state === "running" && s.mcp === "available" && s.tunnel === "connected") overall = { label:"Bridge 正常 · Codex 未连接", tone:"warn" };
+  else if (s.state === "running") overall = { label:"运行中 · 链路不完整", tone:"warn" };
+  $("overall-health").textContent = overall.label;
+  $("overall-health").className = `badge ${overall.tone}`.trim();
   $("runtime-meta").textContent = [s.pid ? `PID ${s.pid}` : "", s.port ? `端口 ${s.port}` : "", s.startedAt ? new Date(s.startedAt).toLocaleTimeString("zh-CN",{hour12:false})+" 启动" : ""].filter(Boolean).join(" · ");
   $("service-error").hidden = !s.error; $("service-error").textContent = s.error || "";
 }
@@ -145,6 +155,44 @@ function renderMcps(w) {
   $("mcps").innerHTML = servers.length ? servers.map(s=>`<div class="mcp-card"><div class="mcp-heading"><h3>${escape(s.serverId)}</h3><span class="badge ${s.loaded?"good":""}">${s.loaded?"已加载":"未加载"}</span></div><p class="mono">${escape(s.url)}</p><div class="mcp-actions"><button data-mcp="local-mcp-probe" data-server="${escape(s.serverId)}">检测</button><button data-mcp="${s.loaded?"local-mcp-unload":"local-mcp-load"}" data-server="${escape(s.serverId)}" class="${s.loaded?"danger":"primary"}">${s.loaded?"卸载":"加载"}</button><span>${s.probeStatus==="available"?`${s.toolCount || 0} tools · ${s.latencyMs || 0}ms`:s.probeStatus==="unavailable"?"检测失败":"尚未检测"}</span></div>${s.probeError?`<p>${escape(s.probeError)}</p>`:""}</div>`).join("") : '<div class="empty-state"><span aria-hidden="true">⊞</span><h3>还没有本地 MCP</h3><p>在项目的 mcpServers 配置中添加回环服务地址。<br>配置完成后启动 Bridge，即可在这里检测与管理。</p></div>';
   $("mcps").querySelectorAll("[data-mcp]").forEach(button=>{button.disabled=snapshot.status.state!=="running"||localBusy||snapshot.busy;button.addEventListener("click",()=>command(button.dataset.mcp,{workspaceId:w.id,serverId:button.dataset.server}));});
 }
+function renderGlobalMcps() {
+  if (!snapshot) return;
+  const servers = [...(snapshot.localMcpServers || [])];
+  const loadedCount = servers.filter(server => server.loaded).length;
+  const workspaceIds = new Set(servers.map(server => server.workspaceId));
+  $("global-mcp-count").textContent = `${loadedCount}/${servers.length}`;
+  $("global-mcp-count").title = `${loadedCount} 个已加载，${servers.length} 个已配置`;
+  $("global-mcp-summary").textContent = servers.length
+    ? `已加载 ${loadedCount} / 已配置 ${servers.length} · 涉及 ${workspaceIds.size} 个工作区`
+    : "所有工作区目前都没有配置本地 MCP。";
+  const dialog = $("global-mcp-dialog");
+  if (globalMcpOpen && !dialog.open) dialog.showModal();
+  if (!globalMcpOpen && dialog.open) dialog.close();
+  const signature = JSON.stringify([servers, snapshot.workspaces.map(workspace => workspace.id), snapshot.status.state, localBusy, snapshot.busy]);
+  if (signature === globalMcpsSignature) return;
+  globalMcpsSignature = signature;
+  const workspaces = new Map(snapshot.workspaces.map(workspace => [workspace.id, workspace]));
+  $("global-mcp-list").innerHTML = servers.length ? servers.map(server => {
+    const loaded = server.loaded === true;
+    const running = snapshot.status.state === "running";
+    const probe = server.probeStatus || "unknown";
+    const stateText = !running ? "Bridge 已停止" : probe === "available" ? "可用" : probe === "unavailable" ? "不可用" : "尚未检测";
+    const stateClass = running && probe === "available" ? "good" : running && probe === "unavailable" ? "bad" : "";
+    const detail = probe === "available"
+      ? `${server.toolCount ?? 0} tools · ${server.latencyMs ?? 0}ms`
+      : probe === "unavailable" ? (server.probeError || "检测失败") : "检测后显示工具数量与延迟";
+    return `<article class="global-mcp-card">
+      <div class="global-mcp-card-heading"><div><p class="global-mcp-workspace">${escape(workspaces.get(server.workspaceId)?.id || server.workspaceId)}</p><h3>${escape(server.serverId)}</h3></div><span class="badge ${loaded ? "good" : ""}">${loaded ? "已加载" : "未加载"}</span></div>
+      <p class="mono global-mcp-url">${escape(server.url)}</p>
+      <div class="global-mcp-card-footer"><span class="global-mcp-probe ${stateClass}"><i class="dot ${stateClass}"></i>${escape(stateText)} <small>${escape(detail)}</small></span><div class="mcp-actions"><button data-global-mcp="local-mcp-probe" data-workspace="${escape(server.workspaceId)}" data-server="${escape(server.serverId)}">检测</button><button data-global-mcp="${loaded ? "local-mcp-unload" : "local-mcp-load"}" data-workspace="${escape(server.workspaceId)}" data-server="${escape(server.serverId)}" class="${loaded ? "danger" : "primary"}">${loaded ? "卸载" : "加载"}</button></div></div>
+      ${probe === "unavailable" && server.probeError ? `<p class="global-mcp-error">${escape(server.probeError)}</p>` : ""}
+    </article>`;
+  }).join("") : '<div class="empty-state"><span aria-hidden="true">⊞</span><h3>尚未配置本地 MCP</h3><p>此处会汇总所有工作区的 MCP。请先在对应工作区的 mcpServers 中添加服务地址。</p></div>';
+  $("global-mcp-list").querySelectorAll("[data-global-mcp]").forEach(button => {
+    button.disabled = snapshot.status.state !== "running" || localBusy || snapshot.busy;
+    button.addEventListener("click", () => command(button.dataset.globalMcp, {workspaceId:button.dataset.workspace, serverId:button.dataset.server}));
+  });
+}
 function updateTabs() { $("details").hidden=activeTab!=="details";$("mcps").hidden=activeTab!=="mcps";$("details-tab").setAttribute("aria-selected",String(activeTab==="details"));$("mcps-tab").setAttribute("aria-selected",String(activeTab==="mcps")); }
 function updateButtons() {
   const s=snapshot?.status.state || "stopped",busy=localBusy||snapshot?.busy;
@@ -156,6 +204,7 @@ function updateButtons() {
   document.querySelectorAll("[data-requires-stopped]").forEach(button=>button.disabled=busy||s!=="stopped");
   for(const name of ["save-config","cancel-edit","pick-folder","project-id","project-root","project-mode"])if($(name))$(name).disabled=busy||s!=="stopped";
   if($("remove-workspace"))$("remove-workspace").disabled=busy||s!=="stopped"||draft?.length<2;
+  renderGlobalMcps();renderCodexDefaults();
   $("footer-status").textContent=expired?"会话已过期，请重新打开应用":draft&&snapshot?.revision!==editRevision?"配置已在外部变化；取消编辑后重新载入":draft?"项目配置有未保存的修改":busy?"正在执行操作…":s==="running"?"服务运行中 · 状态实时更新":"本机控制台已就绪";
 }
 function logTone(log) {
@@ -252,17 +301,39 @@ function renderApiPortSettings() {
   for (const id of ["settings-runtime-key", "settings-tunnel-id", "settings-bridge-port", "settings-health-port"]) $(id).disabled = busy;
   $("settings-api-port-submit").disabled = busy;
 }
+function renderCodexDefaults() {
+  if (!snapshot) return;
+  const dialog = $("codex-defaults-dialog");
+  if (codexDefaultsOpen && !dialog.open) dialog.showModal();
+  if (!codexDefaultsOpen && dialog.open) dialog.close();
+  if (!codexDefaultsInitialized) {
+    $("codex-default-model").value = snapshot.codexDefaults?.defaultModel || "";
+    $("codex-default-effort").value = snapshot.codexDefaults?.defaultEffort || "medium";
+    codexDefaultsInitialized = true;
+  }
+  const busy = localBusy || snapshot.busy || snapshot.status.state !== "stopped";
+  $("codex-default-model").disabled = busy;
+  $("codex-default-effort").disabled = busy;
+  $("codex-defaults-save").disabled = busy;
+  $("codex-defaults-hint").textContent = snapshot.status.state !== "stopped"
+    ? "请先停止 Bridge，再修改默认值。"
+    : busy ? "正在执行操作…" : "保存时会检查配置版本，避免覆盖其他程序的并发修改。";
+}
 async function refresh() {
   snapshot=await request("/api/snapshot");
   if(!currentWorkspaces().some(w=>w.id===selected)){selected=currentWorkspaces()[0]?.id;selectedModule=undefined;}
-  $("settings-codex-summary").textContent = (snapshot.codexDefaults?.defaultModel || "未设置") + " · " + (snapshot.codexDefaults?.defaultEffort || "未设置") + "（当前只读）";
-  renderConnectionSetup();renderApiPortSettings();renderChain();renderTree();renderInspector();renderLogs();updateButtons();
+  $("settings-codex-summary").textContent = (snapshot.codexDefaults?.defaultModel || "未设置") + " · " + (snapshot.codexDefaults?.defaultEffort || "未设置");
+  renderConnectionSetup();renderApiPortSettings();renderCodexDefaults();renderChain();renderTree();renderInspector();renderGlobalMcps();renderLogs();updateButtons();
 }
 async function poll() {
   try{await refresh();}catch(error){$("footer-status").textContent=error.message;$("service-error").textContent=error.message;$("service-error").hidden=false;if(expired)updateButtons();}
   if(!expired)setTimeout(poll,1000);
 }
 $("start").addEventListener("click",()=>command("start"));$("stop").addEventListener("click",()=>command("stop"));$("restart").addEventListener("click",()=>command("restart"));
+$("local-mcp-global").addEventListener("click", () => { globalMcpOpen = true; renderGlobalMcps(); });
+$("global-mcp-close").addEventListener("click", () => { globalMcpOpen = false; renderGlobalMcps(); });
+$("global-mcp-dialog").addEventListener("cancel", () => { globalMcpOpen = false; });
+$("global-mcp-dialog").addEventListener("close", () => { globalMcpOpen = false; });
 function closeSettingsMenu() {
   $("settings-menu").hidden = true;
   $("settings-toggle").setAttribute("aria-expanded", "false");
@@ -277,6 +348,17 @@ $("settings-open-api-ports").addEventListener("click", () => {
   settingsOpen = true;
   renderApiPortSettings();
 });
+$("settings-edit-codex-defaults").addEventListener("click", () => {
+  closeSettingsMenu();
+  codexDefaultsOpen = true;
+  codexDefaultsInitialized = false;
+  renderCodexDefaults();
+  $("codex-default-model").focus();
+});
+$("codex-defaults-close").addEventListener("click", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; renderCodexDefaults(); });
+$("codex-defaults-cancel").addEventListener("click", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; renderCodexDefaults(); });
+$("codex-defaults-dialog").addEventListener("cancel", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; });
+$("codex-defaults-dialog").addEventListener("close", () => { codexDefaultsOpen = false; });
 document.addEventListener("click", event => {
   if (!event.target.closest(".settings-anchor")) closeSettingsMenu();
 });
@@ -325,6 +407,42 @@ $("connection-setup-form").addEventListener("submit", async event => {
 });
 $("settings-api-port-close").addEventListener("click", () => { settingsOpen = false; $("settings-runtime-key").value = ""; renderApiPortSettings(); });
 $("api-port-dialog").addEventListener("cancel", () => { settingsOpen = false; $("settings-runtime-key").value = ""; });
+$("codex-defaults-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (localBusy || snapshot?.busy || snapshot?.status.state !== "stopped") {
+    $("codex-defaults-error").hidden = false;
+    $("codex-defaults-error").textContent = "请先停止 Bridge，再保存 Codex 默认值。";
+    return;
+  }
+  const defaultModel = $("codex-default-model").value.trim();
+  const defaultEffort = $("codex-default-effort").value;
+  if (!defaultModel) {
+    $("codex-defaults-error").hidden = false;
+    $("codex-defaults-error").textContent = "请填写默认模型 ID。";
+    return;
+  }
+  $("codex-defaults-error").hidden = true;
+  localBusy = true;
+  updateButtons();
+  try {
+    await request("/api/action", {action:"save-codex-defaults", revision:snapshot.revision, defaultModel, defaultEffort});
+    codexDefaultsOpen = false;
+    codexDefaultsInitialized = false;
+    toast("Codex 默认值已保存");
+    await refresh();
+  } catch (error) {
+    $("codex-defaults-error").hidden = false;
+    $("codex-defaults-error").textContent = error.message;
+    if (String(error.message).includes("配置已被其他程序修改")) {
+      codexDefaultsInitialized = false;
+      await refresh().catch(() => {});
+    }
+  } finally {
+    localBusy = false;
+    renderCodexDefaults();
+    updateButtons();
+  }
+});
 $("api-port-form").addEventListener("submit", async event => {
   event.preventDefault();
   if(localBusy||snapshot?.busy||snapshot?.status.state!=="stopped")return;

@@ -89,3 +89,24 @@
 .setup-locked-value[hidden]{display:none!important}
 .setup-locked-value .field-title{font-weight:650}
 .setup-locked-value code{overflow-wrap:anywhere}
+
+/* Global local-MCP registry mirrors the Windows overview while preserving per-workspace tabs. */
+.toolbar #local-mcp-global{white-space:nowrap}
+.toolbar #global-mcp-count{display:inline-block;margin-left:5px;padding:1px 6px;border:1px solid var(--border);border-radius:9px;background:var(--sidebar);font-size:10px;font-variant-numeric:tabular-nums}
+.global-mcp-dialog{width:min(760px,calc(100vw - 32px))}
+.codex-defaults-dialog{width:min(560px,calc(100vw - 32px))}
+.global-mcp-dialog .setup-panel{padding:20px}
+.global-mcp-list{display:grid;gap:10px;max-height:min(62vh,560px);overflow:auto;padding-right:2px}
+.global-mcp-card{border:1px solid var(--border);border-radius:8px;padding:13px;background:var(--surface)}
+.global-mcp-card-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.global-mcp-card-heading h3{font-size:13px;margin:3px 0 0}
+.global-mcp-workspace{font-size:10px;color:var(--muted);margin:0}
+.global-mcp-url{font-size:10px;color:var(--muted);overflow-wrap:anywhere;margin:9px 0 11px}
+.global-mcp-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.global-mcp-probe{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
+.global-mcp-probe small{font-size:10px;font-weight:400;color:var(--muted);margin-left:2px}
+.global-mcp-probe.good{color:var(--good)}
+.global-mcp-probe.bad{color:var(--bad)}
+.global-mcp-probe .dot{width:7px;height:7px;flex:0 0 7px}
+.global-mcp-error{font-size:10px;color:var(--bad);overflow-wrap:anywhere;margin:9px 0 0}
+@media(max-width:700px){.global-mcp-dialog .setup-panel{padding:15px}.global-mcp-card-footer{align-items:flex-start}.global-mcp-probe{flex-wrap:wrap}}

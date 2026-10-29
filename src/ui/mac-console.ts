@@ -21,6 +21,7 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("connection-setup"), input: connectionSetupInputSchema }).strict(),
   z.object({ action: z.literal("save-api-port-settings"), input: connectionSettingsInputSchema }).strict(),
   z.object({ action: z.literal("save-config"), revision: z.string().regex(/^[a-f0-9]{64}$/u), workspaces: z.array(workspace).min(1).max(100) }).strict(),
+  z.object({ action: z.literal("save-codex-defaults"), revision: z.string().regex(/^[a-f0-9]{64}$/u), defaultModel: z.string().max(256), defaultEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]) }).strict(),
   z.object({ action: z.literal("refresh-codex"), workspaceId: id }).strict(),
   z.object({ action: z.literal("unbind-codex"), workspaceId: id, moduleId: id }).strict(),
   z.object({ action: z.enum(["local-mcp-load", "local-mcp-unload", "local-mcp-probe"]), workspaceId: id, serverId: id }).strict(),
@@ -157,7 +158,7 @@ export async function launchMacControlUi(configPath: string, options: MacControl
     if (operation) { res.status(409).json({ error: "正在执行操作，请稍后重试" }); return; }
     if (input.action === "connection-setup" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再配置连接。" }); return; }
     if (input.action === "save-api-port-settings" && controller.lifecycleState !== "stopped") { res.status(409).json({ error: "请先停止 Bridge，再保存连接设置。" }); return; }
-    if (input.action === "save-config" && controller.lifecycleState !== "stopped") {
+    if ((input.action === "save-config" || input.action === "save-codex-defaults") && controller.lifecycleState !== "stopped") {
       res.status(409).json({ error: "请先停止 Bridge 再保存配置" }); return;
     }
     const task = (async () => {
@@ -210,6 +211,13 @@ export async function launchMacControlUi(configPath: string, options: MacControl
         const config = await readWorkspaceConfig(configPath);
         if (revision(config.key) !== input.revision) throw new Error("配置已被其他程序修改，请重新载入");
         await writeWorkspaceConfig(configPath, input.workspaces.map(item => ({ id: item.id, root: item.root, mode: item.mode, ...(item.originalId ? { originalId: item.originalId } : {}) })), { expectedKey: config.key });
+      } else if (input.action === "save-codex-defaults") {
+        const config = await readWorkspaceConfig(configPath);
+        if (revision(config.key) !== input.revision) throw new Error("配置已被其他程序修改，请重新载入");
+        await writeWorkspaceConfig(configPath, config.workspaces, {
+          expectedKey: config.key,
+          codexDefaults: { defaultModel: input.defaultModel, defaultEffort: input.defaultEffort },
+        });
       } else if (input.action === "refresh-codex") await controller.getCodexModuleBindings(input.workspaceId, true);
       else if (input.action === "unbind-codex") await controller.unbindCodexModule(input.workspaceId, input.moduleId);
       else if (input.action === "local-mcp-load") await controller.loadLocalMcpServer(input.workspaceId, input.serverId);
