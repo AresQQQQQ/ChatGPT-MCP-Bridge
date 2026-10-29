@@ -135,7 +135,7 @@ pnpm install --frozen-lockfile
 | 模式 | 允许的操作 |
 | --- | --- |
 | `readonly` | 读取、列出、搜索文件及 Git 检查；不允许文件写入和命令执行。 |
-| `workspace` | 在工作区范围内受控写入文件、进行 Git 检查，并运行配置允许的项目脚本和 Recipe。 |
+| `workspace` | 在工作区范围内受控写入文件、进行 Git 检查和受控暂存/提交，并运行配置允许的项目脚本和 Recipe。 |
 | `trusted-dev` | 包含 `workspace` 的能力，并增加开发命令、桌面应用启动、交互式终端和 SSH 操作。 |
 | `handoff` | 读取文件、搜索、Git 检查和项目指令上下文；不允许普通源码写入或命令执行。 |
 
