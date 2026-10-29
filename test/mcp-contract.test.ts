@@ -106,6 +106,11 @@ test("MCP tools expose usable exec union and consistent text/structured results"
     assert.equal(packageBranch.additionalProperties, false);
     for (const branch of execBranches) assert.ok(asArray(branch.required).includes("workspaceId"));
 
+    const imageTool = toolByName(tools, "get_image");
+    assert.equal(imageTool.outputSchema, undefined, "image tools must not expose metadata-only output schemas");
+    const renderedPdfTool = toolByName(tools, "render_pdf_page");
+    assert.equal(renderedPdfTool.outputSchema, undefined, "rendered PDF pages must remain image content");
+
     const readTool = toolByName(tools, "read_file");
     const readOutputSchema = asObject(readTool.outputSchema);
     assert.deepEqual(asArray(readOutputSchema.required), ["workspaceId", "path", "content", "bytes"]);
@@ -267,13 +272,13 @@ test("MCP tools expose usable exec union and consistent text/structured results"
     });
     assert.equal(image.isError, undefined);
     assert.equal(image.content[0]?.type, "image");
+    assert.equal(image.structuredContent, undefined, "image pixels should not be replaced by metadata-only structured content");
     if (image.content[0]?.type === "image") {
       assert.equal(image.content[0].mimeType, "image/png");
       assert.ok(image.content[0].data.length > 0);
+      const imageBytes = Buffer.from(image.content[0].data, "base64");
+      assert.deepEqual([...imageBytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     }
-    const imageStructured = asObject(image.structuredContent);
-    assert.equal(imageStructured.mimeType, "image/png");
-    assert.equal(imageStructured.path, "pixel.png");
 
     const brokenPdfText = await client.callTool({
       name: "extract_pdf_text",

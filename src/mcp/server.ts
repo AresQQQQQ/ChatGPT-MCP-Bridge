@@ -592,25 +592,13 @@ export function createMcpServer(
     title: "Get image",
     description: "Read a safe PNG, JPEG, WebP, or GIF image from a configured workspace and return it as MCP image content for visual inspection.",
     inputSchema: z.object({ workspaceId: workspaceIdSchema, path: relativePathSchema }).strict(),
-    outputSchema: z.object({
-      workspaceId: z.string(),
-      path: z.string(),
-      mimeType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
-      bytes: z.number().int().nonnegative(),
-    }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, async ({ workspaceId, path }) => {
     try {
       const image = await getImage(registry, workspaceId, path);
-      const structuredContent = {
-        workspaceId: image.workspaceId,
-        path: image.path,
-        mimeType: image.mimeType,
-        bytes: image.bytes,
-      };
+      // Return image pixels as standard MCP content; do not project this tool through a metadata-only output schema.
       return {
         content: [{ type: "image" as const, data: image.data.toString("base64"), mimeType: image.mimeType }],
-        structuredContent,
       };
     } catch (error) { return toolError(error); }
   });
@@ -679,33 +667,13 @@ export function createMcpServer(
       page: z.number().int().positive(),
       maxDimension: z.number().int().min(256).max(4096).default(2400),
     }).strict(),
-    outputSchema: z.object({
-      workspaceId: z.string(),
-      path: z.string(),
-      page: z.number().int().positive(),
-      pageCount: z.number().int().positive(),
-      width: z.number().int().positive(),
-      height: z.number().int().positive(),
-      mimeType: z.literal("image/png"),
-      bytes: z.number().int().nonnegative(),
-    }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, async ({ workspaceId, path, page, maxDimension }) => {
     try {
       const rendered = await renderPdfPage(registry, workspaceId, path, { page, maxDimension });
-      const structuredContent = {
-        workspaceId: rendered.workspaceId,
-        path: rendered.path,
-        page: rendered.page,
-        pageCount: rendered.pageCount,
-        width: rendered.width,
-        height: rendered.height,
-        mimeType: rendered.mimeType,
-        bytes: rendered.bytes,
-      };
+      // Return image pixels as standard MCP content; do not project this tool through a metadata-only output schema.
       return {
         content: [{ type: "image" as const, data: rendered.data.toString("base64"), mimeType: rendered.mimeType }],
-        structuredContent,
       };
     } catch (error) { return toolError(error); }
   });
