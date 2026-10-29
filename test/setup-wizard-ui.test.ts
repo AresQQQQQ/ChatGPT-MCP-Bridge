@@ -118,6 +118,18 @@ test("setup.command now routes into the main UI entry point", async () => {
   assert.match(cli, /if \(command === "setup"\) return ui\(options\)/u);
 });
 
+test("Mac Finder launcher installs missing dependencies and builds the ignored app before first launch", async () => {
+  const launcher = await readFile(path.resolve("bridge-ui.command"), "utf8");
+  assert.match(launcher, /Node\.js 22\+/u);
+  assert.match(launcher, /pnpm install --frozen-lockfile/u);
+  assert.match(launcher, /pnpm run ui:build/u);
+  assert.match(launcher, /dist\/ui\/mac-app-host\.js/u);
+  assert.match(launcher, /ChatGPT MCP Bridge\.app/u);
+  assert.match(launcher, /lsof -t "\$APP_EXECUTABLE"/u);
+  assert.match(launcher, /This launcher will not close it/u);
+  assert.match(launcher, /exec node dist\/cli\.js ui --config/u);
+});
+
 test("macOS connection wizard opens official acquisition links in the external browser", async () => {
   const swift = await readFile(path.resolve("src/ui/macos/BridgeControlApp.swift"), "utf8");
   assert.match(swift, /"platform\.openai\.com", "chatgpt\.com", "help\.openai\.com"/u);

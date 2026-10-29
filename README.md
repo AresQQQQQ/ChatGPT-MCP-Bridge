@@ -87,17 +87,14 @@ node dist/cli.js doctor
 
 ### macOS Apple Silicon
 
-Mac 版源码位于 `main` 分支。在 macOS Terminal 中执行：
+Mac 版源码位于统一跨平台分支。在 macOS Terminal 中克隆仓库：
 
-```sh
-git clone https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
-cd ChatGPT-MCP-Bridge
-pnpm install --frozen-lockfile
-pnpm build
-pnpm run setup
-```
+    git clone --branch integration/windows-macos-unified https://github.com/AresQQQQQ/ChatGPT-MCP-Bridge.git
+    cd ChatGPT-MCP-Bridge
 
-已有 clone 可先运行 `git fetch origin`，再运行 `git switch main`。pnpm 应安装到普通终端可发现的位置，不能仅依赖 Codex 附带的 pnpm；详见 [macOS 环境说明](docs/SETUP.md#macos-apple-silicon)。已有 Tunnel 时输入现有 ID 和 Runtime API key，继续使用原 Tunnel。向导使用相同配置格式和 `bridge` profile；不需要复制 Windows YAML 或 Windows 路径。
+确保已安装 Node.js 22+、pnpm 和 Xcode Command Line Tools。首次使用直接双击项目根目录的 bridge-ui.command，或在 Terminal 运行 ./bridge-ui.command。它会在依赖缺失时安装锁定依赖，并在 UI 构建产物缺失或过期时自动构建，然后打开原生控制台。首次成功构建后，Finder 中会出现 ChatGPT MCP Bridge.app；以后可直接双击这个应用启动。
+
+如果 Finder 启动时找不到 pnpm，请先在普通 Terminal 安装 pnpm（例如 npm install -g pnpm@11.19.0），再双击 bridge-ui.command。Tunnel ID 和 Runtime API key 在 UI 连接向导中配置；已有 Tunnel 可以继续使用，无需复制 Windows profile 或 Windows 路径。
 
 将本机 `mcp-bridge.json` 的工作区改为实际 Mac 项目绝对路径；例如 Bridge 自身可用 `id: bridge-mac`、`mode: trusted-dev`，`allowedScripts: ["test", "build", "typecheck"]`（本项目没有 lint script）。
 
@@ -116,16 +113,21 @@ pnpm start
 
 Mac 控制台沿用 Windows 的连接链路、项目/Module 树、项目配置、Codex 绑定、本地 MCP 与日志区域，使用 AppKit 原生窗口和系统 WebKit；无需 Electron、Tauri 或额外 Web 框架。
 
+**从 GitHub 下载源码后，第一次使用请双击项目根目录的 `bridge-ui.command`。** 如果依赖或 UI 构建产物不存在，它会检查 Node.js 22+ 与 pnpm，缺少依赖时执行锁文件安装，缺少/过期的 UI 产物时自动运行构建，然后启动控制台。首次成功构建后，项目根目录就会出现 Finder 可双击的 **ChatGPT MCP Bridge.app**；之后优先直接双击这个应用即可。
+
+也可以在 Terminal 中运行：
+
 ```sh
-# 显式构建 TypeScript、原生应用、图标和签名：
-pnpm run ui:build
-# 启动已构建的应用：
-pnpm run ui
-# 或在 Finder 双击：
+# 一键准备依赖、构建缺失的 UI 并启动：
 ./bridge-ui.command
+
+# 如需手动构建 TypeScript、原生应用、图标和签名：
+pnpm run ui:build
+# 只启动已有产物：
+pnpm run ui
 ```
 
-`ui:build` 使用本机 Xcode Command Line Tools 编译 arm64 应用。`pnpm run ui`、`bridge-ui.command` 和 `node dist/cli.js ui` 只启动已有产物，不执行构建，也不根据源码时间戳自动重建。缺少应用或 Node host 产物时，会提示先运行 `pnpm run ui:build`。构建完成后，可以直接在 Finder 双击项目根目录的 **ChatGPT MCP Bridge.app**，无需保留 Terminal 窗口。首次打开会确认 Bridge 项目目录，随后记住该目录授权。需要手动重建时先退出应用，再运行 `pnpm run ui:build`。
+首次构建需要本机 Xcode Command Line Tools（提供 `swiftc` 和 macOS SDK）。如果没有 pnpm，启动入口会提示安装命令；如果需要重建但应用仍在运行，入口会要求先手动退出，不会擅自关闭应用。构建完成后，Finder 中的 `ChatGPT MCP Bridge.app` 是指向本机应用包的入口；应用包与入口都在 Git 中忽略，因为它们是绑定当前机器项目路径的本地产物。首次打开会确认 Bridge 项目目录，随后记住该目录授权。
 
 在窗口中点击“启动服务”后，Bridge 与 Tunnel 由该应用管理。可停止、重新启动，并在停止状态下编辑项目配置。文件夹选择器、⌘Q 退出、⌘R 启动与 ⌘. 停止均为 Mac 原生操作；关闭应用会停止它管理的服务。启动前先停止其他 Terminal/UI 实例，避免端口冲突。
 

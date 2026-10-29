@@ -108,20 +108,19 @@ Windows 的安装路径选择测试继续通过，Windows 三个启动脚本及 
 
 Mac UI 使用 AppKit 原生窗口、系统 WebKit 和已有 Node/TypeScript 控制层，复用 Windows UI 的 BridgeController、工作区配置、Codex 绑定及本地 MCP 操作。未引入第三方桌面运行时。
 
-显式构建需要 Xcode Command Line Tools（提供 swiftc、macOS SDK），启动已有应用不调用该工具链。构建和运行分别执行：
+首次从 GitHub 下载或克隆源码后，先确认已安装 Node.js 22+、pnpm 和 Xcode Command Line Tools。然后在 Finder 双击项目根目录的 bridge-ui.command，或在 Terminal 运行命令：
 
-```sh
-# 构建 TypeScript、Mac app、图标和 ad-hoc 签名：
-pnpm run ui:build
-# 只启动已有应用（以下任选其一）：
-pnpm run ui
-./bridge-ui.command
-node dist/cli.js ui
-```
+    ./bridge-ui.command
 
-运行入口不执行 tsc、swiftc、codesign 或构建脚本，也不根据源码 mtime 自动重建。应用可执行文件或 Node host 产物缺失时快速失败，提示“Mac 控制台尚未构建，请先运行 pnpm run ui:build。”源码修改后是否重建由用户明确执行 `ui:build` 决定。
+该入口会在需要时执行 pnpm install --frozen-lockfile，并在 TypeScript/Node host 或原生 Mac app 缺失、或相关源码比构建产物更新时执行 pnpm run ui:build。构建成功后会生成 .mcp-bridge-state/ChatGPT MCP Bridge.app，并在项目根目录创建 ChatGPT MCP Bridge.app 的 Finder 可见入口。以后可以直接双击这个 .app。
 
-构建产物实际位于 `.mcp-bridge-state/ChatGPT MCP Bridge.app`，项目根目录创建同名 Finder 可见链接；两者都 Git ignored。应用带有本机 ad-hoc 签名和图标，不是已公证的分发安装包。Finder 双击应用可直接打开独立窗口，不需要 Terminal 保持运行。首次会通过原生文件夹选择器确认此 Bridge 项目目录并保存目录访问书签，避免 Documents 目录权限阻塞启动；不请求完整磁盘访问。重新构建前先退出应用，避免运行期间改变签名。Node/依赖/构建产物仍在本机项目目录中；移动目录后重新执行构建。
+如果没有 pnpm，启动入口会提示安装命令；如果应用正在运行而入口判断需要安装依赖或重建，它会要求用户先手动退出，不会自动关闭正在运行的 Bridge。首次构建需要 Xcode Command Line Tools（提供 swiftc 和 macOS SDK）。
+
+需要手动构建时仍可运行命令：
+
+    pnpm run ui:build
+
+pnpm run ui 和 node dist/cli.js ui 只启动已有产物，不负责首次安装依赖或自动构建。应用包及 Finder 入口都被 Git 忽略，因为应用包包含本机编译二进制、签名和当前项目的绝对路径；忽略它们不影响下载源码后通过 bridge-ui.command 自动生成。首次打开会通过原生文件夹选择器确认此 Bridge 项目目录并保存目录访问书签，不请求完整磁盘访问。重新构建前先退出应用，避免运行期间改变签名；移动项目目录后需要重新构建。
 
 - **连接链路：** ChatGPT、Tunnel、MCP、Bridge 与 Codex 状态，以及 PID、端口和启动时间。ChatGPT 节点表示 Tunnel 已就绪，不代表检测到了某个具体聊天正在调用。
 - **服务：** 启动、停止和重新启动，⌘R 启动、⌘. 停止，⌘Q 或关闭窗口退出；⌘⇧R 重新载入控制台。
