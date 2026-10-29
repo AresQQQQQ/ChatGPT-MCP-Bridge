@@ -23,6 +23,8 @@ test("macOS exposes a global local-MCP overview using the shared registry and ex
   assert.match(js, /local-mcp-unload/u);
   assert.match(js, /local-mcp-load/u);
   assert.match(js, /save-codex-defaults/u);
+  assert.match(js, /function logLevelLabel\(/u);
+  assert.match(js, /className="log-level"/u);
   assert.match(server, /save-codex-defaults/u);
   assert.match(server, /codexDefaults: \{ defaultModel: input\.defaultModel, defaultEffort: input\.defaultEffort \}/u);
   assert.match(server, /getLocalMcpServers\(\)/u);

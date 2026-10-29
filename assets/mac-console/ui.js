@@ -207,16 +207,21 @@ function updateButtons() {
   renderGlobalMcps();renderCodexDefaults();
   $("footer-status").textContent=expired?"会话已过期，请重新打开应用":draft&&snapshot?.revision!==editRevision?"配置已在外部变化；取消编辑后重新载入":draft?"项目配置有未保存的修改":busy?"正在执行操作…":s==="running"?"服务运行中 · 状态实时更新":"本机控制台已就绪";
 }
-function logTone(log) {
+function logLevel(log) {
   const message = String(log.message || "");
-  let level = "";
   let match = message.match(/"level"\s*:\s*"(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)"/i);
-  if (match) level = match[1].toUpperCase();
-  else {
-    match = message.match(/(?:^|[\[\s])(WARN|WARNING|ERROR|FATAL|DEBUG|INFO)(?:\]|:|\s)/i);
-    if (match) level = match[1].toUpperCase();
-  }
-  if (["ERROR", "FATAL"].includes(level) || (!level && log.stream === "stderr")) return "error";
+  if (match) return match[1].toUpperCase();
+  match = message.match(/(?:^|[\[\s])(WARN|WARNING|ERROR|FATAL|DEBUG|INFO)(?:\]|:|\s)/i);
+  if (match) return match[1].toUpperCase();
+  return log.stream === "stderr" ? "ERROR" : "INFO";
+}
+function logLevelLabel(log) {
+  const level = logLevel(log);
+  return ({TRACE:"调试", DEBUG:"调试", INFO:"信息", WARN:"警告", WARNING:"警告", ERROR:"错误", FATAL:"严重错误"})[level] || "信息";
+}
+function logTone(log) {
+  const level = logLevel(log);
+  if (["ERROR", "FATAL"].includes(level)) return "error";
   if (["WARN", "WARNING"].includes(level)) return "warn";
   if (["DEBUG", "TRACE"].includes(level)) return "debug";
   return "info";
@@ -230,8 +235,9 @@ function renderLogs() {
     const row=document.createElement("div");row.className=`log-row ${log.stream} level-${logTone(log)}`;
     const time=document.createElement("span");time.className="log-time";time.textContent=new Date(log.timestamp).toLocaleTimeString("zh-CN",{hour12:false});
     const source=document.createElement("span");source.className="log-source";source.textContent=log.source;
+    const level=document.createElement("span");level.className="log-level";level.textContent=logLevelLabel(log);
     const message=document.createElement("span");message.className="log-message";message.textContent=log.message;
-    row.append(time,source,message);return row;
+    row.append(time,source,level,message);return row;
   }));
   if($("follow").checked)$("log-scroll").scrollTop=$("log-scroll").scrollHeight;
 }
