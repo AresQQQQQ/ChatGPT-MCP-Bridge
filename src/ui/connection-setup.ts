@@ -35,6 +35,7 @@ export interface ConnectionSetupStatus extends ConnectionSetupProgress {
   readonly hasBridgeAuth: boolean;
   readonly hasRuntimeKey: boolean;
   readonly hasTunnelId: boolean;
+  readonly legacyTunnelIdUnknown: boolean;
   readonly tunnelConfigured: boolean;
   readonly tunnelId: string;
   readonly tunnelProfileMatchesId: boolean;
@@ -121,16 +122,18 @@ export async function readConnectionSetupStatus(
   const hasRuntimeKey = Boolean(env.CONTROL_PLANE_API_KEY);
   const tunnelId = config?.tunnelId ?? config?.tunnel?.tunnelId ?? "";
   const hasTunnelId = Boolean(tunnelId);
+  // Backward compatibility: older working profiles did not persist their Tunnel ID.
+  const legacyTunnelIdUnknown = Boolean(config?.tunnel && !tunnelId && !config.tunnel.tunnelId);
   const tunnelConfigured = Boolean(config?.tunnel);
-  const tunnelProfileMatchesId = Boolean(config?.tunnel && config.tunnel.tunnelId && tunnelId && config.tunnel.tunnelId === tunnelId);
+  const tunnelProfileMatchesId = Boolean(config?.tunnel && (legacyTunnelIdUnknown || (Boolean(config.tunnel.tunnelId) && Boolean(tunnelId) && config.tunnel.tunnelId === tunnelId)));
   const missingItems: string[] = [];
   if (!hasRuntimeKey) missingItems.push("Runtime API key");
-  if (!hasTunnelId) missingItems.push("Tunnel ID");
+  if (!hasTunnelId && !tunnelConfigured) missingItems.push("Tunnel ID");
   if (!tunnelConfigured) missingItems.push("Tunnel profile 尚未初始化");
   else if (!tunnelProfileMatchesId) missingItems.push("Tunnel profile 与当前 Tunnel ID 不一致，需要重新初始化");
   else if (!tunnelProfileAvailable) missingItems.push("Tunnel profile 目录");
   else if (!tunnelClientAvailable) missingItems.push("Tunnel Client 文件");
-  const ready = rawConfig !== undefined && !configurationError && hasRuntimeKey && hasTunnelId &&
+  const ready = rawConfig !== undefined && !configurationError && hasRuntimeKey &&
     tunnelConfigured && tunnelProfileMatchesId && tunnelProfileAvailable && tunnelClientAvailable;
 
   return {
@@ -140,6 +143,7 @@ export async function readConnectionSetupStatus(
     hasBridgeAuth,
     hasRuntimeKey,
     hasTunnelId,
+    legacyTunnelIdUnknown,
     tunnelConfigured,
     tunnelId,
     tunnelProfileMatchesId,
@@ -250,7 +254,7 @@ export async function saveConnectionSettings(
   const bridgePort = input.bridgePort;
   const healthPort = input.healthPort;
   if (bridgePort === healthPort) throw new Error("健康检查端口不能与 Bridge 端口相同。");
-  await assertPortAvailable(bridgePort);
+  if (bridgePort !== (existing?.port ?? 3000)) await assertPortAvailable(bridgePort);
 
   const envPath = path.join(path.dirname(absolute), ".env");
   const oldEnv = await readOptional(envPath);
@@ -266,13 +270,11 @@ export async function saveConnectionSettings(
   const portsChanged = bridgePort !== (existing?.port ?? 3000) ||
     (Boolean(tunnel) && healthPort !== oldHealthPort);
   const tunnelIdChanged = Boolean(tunnel) && desiredTunnelId !== (tunnel?.tunnelId ?? "");
-  const firstTunnelIdSave = Boolean(tunnel && !existingTunnelId && desiredTunnelId);
   if (!tunnel || healthPort !== oldHealthPort) await assertPortAvailable(healthPort);
 
-  // First-time credentials/ID are saved even if the profile is absent or needs repair.
-  // For a legacy profile with no known ID, persist the desired values first; the wizard
-  // then performs initialization as a separate retryable step.
-  if (tunnel && !firstTunnelIdSave && (portsChanged || tunnelIdChanged)) {
+  // When no profile exists, persist settings first so the wizard can initialize it on the next step.
+  // Changes to an existing profile ID or endpoint are initialized transactionally before switching config.
+  if (tunnel && (portsChanged || tunnelIdChanged)) {
     if (!desiredTunnelId) throw new Error("请先填写 Tunnel ID，再修改已初始化 Tunnel 的连接参数。");
     if (!nextKey) throw new Error("重新初始化 Tunnel 前必须先在设置中保存 Runtime API key。");
     await setupTunnel({

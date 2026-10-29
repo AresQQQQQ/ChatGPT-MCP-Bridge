@@ -207,3 +207,36 @@ test("API/port settings refuse to change ports for a legacy Tunnel profile witho
   assert.equal(await readFile(configPath, "utf8"), beforeConfig);
   assert.equal(await readFile(path.join(root, ".env"), "utf8"), beforeEnv);
 });
+
+test("legacy profile without a saved Tunnel ID remains usable", async t => {
+  const root = await temporaryRoot(t);
+  const configPath = path.join(root, "mcp-bridge.json");
+  await ensureUiBootstrapConfig(configPath);
+  const bridgePort = await freePort();
+  await setConfigPort(configPath, bridgePort);
+  const clientPath = path.join(root, "legacy-tunnel-client");
+  await writeFile(clientPath, "test-client");
+  const config = JSON.parse(await readFile(configPath, "utf8")) as Record<string, any>;
+  delete config.tunnelId;
+  config.tunnelHealthPort = 8080;
+  config.tunnel = {
+    clientPath,
+    profile: "web-test",
+    healthUrl: "http://127.0.0.1:8080",
+  };
+  await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+  await writeFile(path.join(root, ".env"), "CONTROL_PLANE_API_KEY=existing-runtime-key-fixture\n");
+
+  const before = await readFile(configPath, "utf8");
+  const status = await readConnectionSetupStatus(configPath);
+
+  assert.equal(status.hasRuntimeKey, true);
+  assert.equal(status.hasTunnelId, false);
+  assert.equal(status.legacyTunnelIdUnknown, true);
+  assert.equal(status.tunnelConfigured, true);
+  assert.equal(status.tunnelProfileMatchesId, true);
+  assert.equal(status.tunnelProfileAvailable, true);
+  assert.equal(status.tunnelClientAvailable, true);
+  assert.equal(status.ready, true);
+  assert.equal(await readFile(configPath, "utf8"), before);
+});

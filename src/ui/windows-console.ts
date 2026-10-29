@@ -1151,11 +1151,11 @@ function Update-ConnectionSetup($message) {
   if($setup.hasTunnelId -and [string]::IsNullOrWhiteSpace($settingsTunnelIdBox.Text)){$settingsTunnelIdBox.Text=[string]$setup.tunnelId}
   $script:setupReady=[bool]$setup.ready
   $script:setupHasTunnelId=[bool]$setup.hasTunnelId
-  $setupTunnelIdEditPanel.Visibility=if($setup.hasTunnelId){'Collapsed'}else{'Visible'}
-  $setupTunnelIdLockedPanel.Visibility=if($setup.hasTunnelId){'Visible'}else{'Collapsed'}
+  $setupTunnelIdEditPanel.Visibility=if($setup.hasTunnelId -or $setup.legacyTunnelIdUnknown){'Collapsed'}else{'Visible'}
+  $setupTunnelIdLockedPanel.Visibility=if($setup.hasTunnelId -or $setup.legacyTunnelIdUnknown){'Visible'}else{'Collapsed'}
   $setupRuntimeKeyEditPanel.Visibility=if($setup.hasRuntimeKey){'Collapsed'}else{'Visible'}
   $setupRuntimeKeyLockedPanel.Visibility=if($setup.hasRuntimeKey){'Visible'}else{'Collapsed'}
-  $setupParameterHint.Text=if($setup.hasRuntimeKey -or $setup.hasTunnelId){"已保存的参数在向导中只读；请补全缺失项。需要修改已保存的值，请前往「设置 → 连接设置」。"}else{"首次填写会调用统一连接配置保存接口。参数保存后，向导中将只读显示。"}
+  $setupParameterHint.Text=if($setup.legacyTunnelIdUnknown){"检测到旧版 Tunnel profile，原连接可继续使用；Tunnel ID 未记录。如需更换或重新初始化，请前往「设置 → 连接设置」。"}elseif($setup.hasRuntimeKey -or $setup.hasTunnelId){"已保存的参数在向导中只读；请补全缺失项。需要修改已保存的值，请前往「设置 → 连接设置」。"}else{"首次填写会调用统一连接配置保存接口。参数保存后，向导中将只读显示。"}
   if($setup.running){
     $setupProgressState.Text="进行中";$setupProgressState.Foreground=[Windows.Media.Brushes]::DodgerBlue;$setupProgressBadge.Background=[Windows.Media.Brushes]::AliceBlue;$setupProgressBar.Visibility='Visible'
   }elseif($setup.success){
@@ -1175,7 +1175,7 @@ function Update-ConnectionSetup($message) {
   $script:connectionSetupBusy=[bool]$setup.running
   if(-not $setup.running -and ($setup.success -or $setup.error -or $setup.progress -match '已保存|未完成|已同步')){$script:connectionSetupBusy=$false}
   $formEnabled=(-not $setup.running) -and ($script:currentState -eq 'stopped')
-  $setupTunnelIdBox.IsEnabled=$formEnabled -and -not [bool]$setup.hasTunnelId
+  $setupTunnelIdBox.IsEnabled=$formEnabled -and -not [bool]$setup.hasTunnelId -and -not [bool]$setup.legacyTunnelIdUnknown
   $setupRuntimeKeyBox.IsEnabled=$formEnabled -and -not [bool]$setup.hasRuntimeKey
   $setupApplyButton.Content=if($setup.ready){'已完成'}elseif($setup.hasTunnelId -and $setup.hasRuntimeKey){'继续初始化'}else{'保存并初始化'}
   $setupApplyButton.IsEnabled=$formEnabled -and -not [bool]$setup.configurationError -and -not [bool]$setup.ready

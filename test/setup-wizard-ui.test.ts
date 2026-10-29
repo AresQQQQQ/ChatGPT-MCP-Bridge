@@ -25,6 +25,7 @@ test("Windows main console embeds connection setup and keeps the Runtime API key
   assert.match(source, /PasswordBox x:Name="SetupRuntimeKeyBox"/u);
   assert.match(source, /x:Name="SetupTunnelIdBox"/u);
   assert.match(source, /x:Name="SetupTunnelIdLockedPanel"/u);
+  assert.match(source, /setup\.legacyTunnelIdUnknown/u);
   assert.match(source, /x:Name="SetupRuntimeKeyLockedPanel"/u);
   assert.match(source, /x:Name="SettingsTunnelIdBox"/u);
   assert.match(source, /https:\/\/platform\.openai\.com\/settings\/organization\/tunnels/u);
@@ -62,6 +63,7 @@ test("macOS main console embeds the same connection setup fields and posts to it
   assert.ok(js.includes('command("connection-setup"'));
   assert.ok(js.includes('command("save-api-port-settings"'));
   assert.ok(js.includes('dialog.showModal()'));
+  assert.ok(js.includes("state.legacyTunnelIdUnknown"));
   assert.ok(js.includes("renderConnectionSetup"));
   assert.ok(server.includes('action: z.literal("connection-setup")'));
   assert.ok(server.includes('action: z.literal("save-api-port-settings")'));

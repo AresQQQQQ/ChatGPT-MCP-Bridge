@@ -202,12 +202,12 @@ function renderConnectionSetup() {
     $("setup-runtime-key").value = "";
     setupInitialized = true;
   }
-  $("setup-tunnel-id-field").hidden = Boolean(state.hasTunnelId);
-  $("setup-tunnel-id-locked").hidden = !state.hasTunnelId;
-  $("setup-tunnel-id-readonly").textContent = state.tunnelId || "";
+  $("setup-tunnel-id-field").hidden = Boolean(state.hasTunnelId || state.legacyTunnelIdUnknown);
+  $("setup-tunnel-id-locked").hidden = !(state.hasTunnelId || state.legacyTunnelIdUnknown);
+  $("setup-tunnel-id-readonly").textContent = state.tunnelId || (state.legacyTunnelIdUnknown ? "旧版 profile 可继续使用；Tunnel ID 未记录。需要重新绑定时请前往设置。" : "");
   $("setup-runtime-key-field").hidden = Boolean(state.hasRuntimeKey);
   $("setup-runtime-key-locked").hidden = !state.hasRuntimeKey;
-  $("setup-key-hint").textContent = state.hasRuntimeKey || state.hasTunnelId
+  $("setup-key-hint").textContent = state.legacyTunnelIdUnknown ? "检测到旧版 Tunnel profile，原连接可继续使用；如需绑定新的 Tunnel ID，请前往设置。" : state.hasRuntimeKey || state.hasTunnelId
     ? "已保存的参数只读显示；请填写缺失项。需要修改已保存的值，请前往「设置 → 连接设置」。"
     : "首次填写会使用统一连接配置保存接口。Runtime API key 仅保存在本机 .env。";
   $("setup-error").hidden = !state.error;
@@ -248,7 +248,7 @@ function renderApiPortSettings() {
   const dialog = $("api-port-dialog");
   if (settingsOpen && !dialog.open) dialog.showModal();
   if (!settingsOpen && dialog.open) dialog.close();
-  $("api-port-hint").textContent = state.tunnelConfigured && !state.tunnelProfileMatchesId
+  $("api-port-hint").textContent = state.legacyTunnelIdUnknown ? "当前旧版 profile 可继续使用；Tunnel ID 未记录。若在此填写新 ID，保存后会重新初始化 profile。" : state.tunnelConfigured && !state.tunnelProfileMatchesId
     ? "Tunnel ID 与当前 profile 不一致；保存新的 Tunnel ID 会重新初始化 profile。"
     : "修改连接参数前请先停止 Bridge。Tunnel ID 或端口变化时，系统会同步更新 Tunnel profile。";
   const busy = localBusy || snapshot.busy || snapshot.status.state !== "stopped";
