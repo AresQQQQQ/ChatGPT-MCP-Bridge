@@ -2,7 +2,7 @@
 
 ## 审计范围
 
-- Windows UI 基线：`integration/windows-macos-unified`，本地提交 `79a31e92770a0e84ad610f4e73d4aefd5f3aa221`。
+- Windows UI 基线：双平台统一前的 `main` 提交 `79a31e92770a0e84ad610f4e73d4aefd5f3aa221`。
 - macOS UI 基线：本地提交 `f85500eebe87c3ce9a515f13a6509cedebf2d120`。相对 `79a31e9` 的差异仅涉及首次启动脚本、README、安装文档和测试，不包含控制台 UI 源码。
 - 本矩阵比较用户可见功能、UI 控制接口和平台适配；不同原生 UI 技术栈本身不视为缺陷。
 - 本轮为静态源码审计，不代表所有交互都已在两台机器上进行人工 E2E 验收。
