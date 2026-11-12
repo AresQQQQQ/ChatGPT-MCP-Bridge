@@ -17,7 +17,7 @@ export const PASSWORD_UI_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "Add-Type -AssemblyName PresentationFramework",
   "$window = New-Object System.Windows.Window",
-  "$window.Title = 'MCP Bridge - SSH 密码输入'",
+  "$window.Title = 'MCP Bridge - 原生 SSH PTY 密码输入'",
   "$window.Width = 430",
   "$window.Height = 210",
   "$window.ResizeMode = 'NoResize'",

@@ -26,22 +26,21 @@
 | MCP 探测详情 | 可用性、工具数量、延迟、错误 | 可用性、工具数量、延迟、错误 | 基本对齐 | 全局总览应复用已有 snapshot 字段 |
 | 整体健康状态摘要 | 综合 Bridge、MCP、Tunnel、Codex 状态显示运行正常 / 部分链路未连接 | 已增加与 Windows 对应的聚合健康徽标，展示运行正常、Codex 未连接、链路不完整和服务异常 | UI 已对齐（当前规则镜像，待 CI 验证） | 后续可将规则进一步提取为共享状态契约，避免 PowerShell 与 JavaScript 逻辑漂移 |
 | Codex 默认模型 / 推理等级 | 设置中可编辑并保存 | 已新增编辑对话框和 `save-codex-defaults` API；复用共享配置写入、模型/推理等级校验和 revision 冲突保护 | 已补齐（本次实现，待 CI 验证） | 保持停止服务后保存，并验证外部并发修改时拒绝覆盖 |
-| SSH 主机 CRUD | 全局主机列表，新增、修改、删除、刷新、密码状态 | 已新增全局主机管理对话框与受认证的 list/save/remove API，支持新增、编辑、别名重命名、删除和凭据状态 | 已实现（待 CI 与首次真实 Keychain 使用验收） | 使用共享主机元数据模型，不把密码写入文件或返回给 UI/API 调用方 |
-| SSH 密码安全存储 | Windows Credential Manager | `MacKeychainVault` 通过原生 Security framework helper 读写用户 Keychain；密码通过 stdin/stdout 传递，不进入进程参数 | 已实现 | Keychain helper 首次使用时在本机编译，产物放入被 Git 忽略的 `.mcp-bridge-state` |
-| SSH 首次主机密钥信任 | 首次使用保存的 SSH 主机连接时自动扫描并记录公钥；后续严格校验，密钥变化时拒绝连接 | 复用同一共享 `SavedSshHostManager` 与信任策略 | 已对齐（TOFU） | 首次信任不验证设备真实身份；适合用户明确接受风险的自管设备。密钥变化绝不自动覆盖旧记录 |
 | 日志自动滚动 | 支持 | 支持 | 已对齐 | 保持行为一致 |
 | 日志级别展示 | 独立级别列，警告/错误着色 | 已增加独立的文字级别列，并保留现有颜色分类 | UI 已补齐（待 CI 验证） | Windows 可考虑增加筛选，但应保留 Mac 已有筛选能力 |
 | 日志筛选 / 搜索 | 当前 UI 无同等的来源筛选、关键词搜索入口 | 支持来源筛选、关键词搜索 | Mac 更丰富 | 保留 Mac 优势；后续评估是否将筛选能力引入 Windows |
 | 日志复制 / 清空视图 | 当前 UI 未发现对应入口 | 支持复制可见日志、清空当前视图 | Mac 更丰富 | 保留 Mac 优势；清空仅影响视图，不删除底层日志 |
 | 项目配置冲突保护 | 使用配置快照键校验 | 使用 revision/hash 校验 | 实现不同、目标一致 | 增加契约测试验证两端均拒绝过期写入 |
 | 原生目录选择器 | Windows 文件夹选择器 | macOS 原生文件夹选择器与目录访问书签 | 平台实现不同 | 合理的平台差异，不需要统一实现 |
-| 应用凭据与原生启动 | Windows 原生桌面启动与 Credential Manager | macOS `.app` / `bridge-ui.command` 与目录授权书签 | 平台实现不同 | 合理的平台差异；共享首次启动文档与错误语义 |
+| 原生启动与目录授权 | Windows 原生桌面启动 | macOS `.app` / `bridge-ui.command` 与目录授权书签 | 平台实现不同 | 合理的平台差异；共享首次启动文档与错误语义 |
+
+原始 Bridge SSH 主机管理已移除。主机元数据迁移到本地 `local-mcps/ssh-mcp-server`（classfang），密码填写与主机指纹确认由 classfang 的本机 UI 独立管理，不属于 Bridge 双端 UI 对等范围。
 
 ## 代码依据
 
-- Windows UI：`src/ui/windows-console.ts`，包含 `LocalMcpButton`、`LocalMcpPopup`、SSH 主机设置、Codex 默认值编辑和 `Update-OverallStatus`。
+- Windows UI：`src/ui/windows-console.ts`，包含 `LocalMcpButton`、`LocalMcpPopup`、Codex 默认值编辑和 `Update-OverallStatus`。
 - macOS UI：`assets/mac-console/index.html`、`assets/mac-console/ui.js`。
-- macOS 控制 API：`src/ui/mac-console.ts` 的 `save-config` 管理工作区，`save-codex-defaults` 管理全局 Codex 默认值；新增受认证的 `/api/ssh/hosts`、`/api/ssh/save`、`/api/ssh/remove` 路由。
+- macOS 控制 API：`src/ui/mac-console.ts` 的 `save-config` 管理工作区，`save-codex-defaults` 管理全局 Codex 默认值。
 - 共享核心：`src/control/bridge-controller.ts` 已提供 `getLocalMcpServers`、`loadLocalMcpServer`、`unloadLocalMcpServer`、`probeLocalMcpServer`。
 - 配置保存：`src/ui/workspace-config.ts` 的写入选项已支持 `codexDefaults`，因此 Codex 默认值差异主要在 Mac UI/API 接线和验证，不需要重写配置存储层。
 
@@ -51,8 +50,6 @@
 2. **P1：统一整体健康状态摘要。** Mac 已补齐与 Windows 相同的聚合结论；后续可进一步把规则抽成共享状态契约，并为各异常状态增加对应原因说明。
 3. **P1：Codex 默认值编辑。** 已新增独立的 `save-codex-defaults` action，复用 `revision` 检查和 `writeWorkspaceConfig`；待本次 CI 验证。
 4. **P2：日志 UI 语义对齐。** Mac 已增加可见日志级别文字；Windows 日志筛选属于可选增强，不应因此削弱 Mac 已有功能。
-5. **P2：macOS SSH host / Keychain。** 已实现 Keychain adapter、隐藏密码对话框、全局主机 CRUD API/UI 和平台 OpenSSH 连接；后续需要在目标 Mac 上首次保存/读取/删除一条测试凭据，确认系统 Keychain 授权交互符合预期。
-
 ## 验收原则
 
 - 新增通用功能时，必须同时更新本矩阵、两端 UI/API 和对应测试，或明确记录为平台专属。

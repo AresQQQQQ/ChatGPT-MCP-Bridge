@@ -117,7 +117,7 @@ test("MCP HTTP enforces exact Host/Origin and Bearer authentication", async () =
     try {
       await client.connect(transport);
       const tools = await client.listTools();
-      assert.equal(tools.tools.length, 65);
+      assert.equal(tools.tools.length, 63);
       const imageContentTools = new Set(["get_image", "render_pdf_page"]);
       assert.ok(tools.tools.filter((tool) => !imageContentTools.has(tool.name)).every((tool) => tool.outputSchema !== undefined));
       assert.ok(tools.tools.filter((tool) => imageContentTools.has(tool.name)).every((tool) => tool.outputSchema === undefined));

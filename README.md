@@ -143,7 +143,7 @@ Windows 与 macOS 都从 GitHub main 更新。先停止本机 Bridge/Tunnel；�
 脚本仅接受 main 分支和干净的源码工作树，执行 git fetch、检查本地/远端提交关系，并只允许 fast-forward 到 origin/main。依赖清单变更时执行 pnpm install --frozen-lockfile，随后构建并运行 doctor。诊断通过后，只启动当前电脑本机配置中的 Bridge 与 Tunnel。私有配置、密钥、状态目录和 Tunnel profile 不参与源码同步。更新失败时保留错误输出，不会强制重置本地分支。
 
 GitHub Actions 在 Windows 与 Apple Silicon macOS runner 上分别运行安装、typecheck、完整测试和构建；macOS job 还会编译原生 AppKit/WebKit 控制台。
-保存的 SSH 主机现支持 Windows Credential Manager 与 macOS Keychain；两端均可通过本机 UI 管理全局主机，SSH 密码不会写入配置文件或返回给 MCP。使用 `ssh_start_saved` 首次连接时会自动记录扫描到的 SSH 主机密钥（TOFU），后续连接严格校验；若已信任的密钥变化，Bridge 会拒绝连接而不会自动覆盖。TOFU 不验证首次密钥对应的真实设备身份，请仅对自己管理且接受该风险的设备使用。macOS 首次使用 Keychain 时会在本机编译安全 helper，并可能触发系统 Keychain 授权提示。
+原始 Bridge 的保存 SSH 主机、Credential Manager / Keychain 密码托管以及 `ssh_host_*`、`ssh_start_saved` 工具已移除。主机元数据已迁移到本地 `local-mcps/ssh-mcp-server`（classfang）；密码不会从 Bridge 迁移，需在 classfang 的本机 UI 中逐台填写并确认主机指纹。classfang 现同时提供命令、Job、SFTP 和 `session-*` 交互式 PTY；Bridge 的通用 PTY 终端工具继续作为独立本机终端能力保留。
 ## 连接 ChatGPT
 
 本地向导保存 Tunnel ID 和 Runtime API key **不会自动在 ChatGPT 创建插件**。本机 Bridge 与 Tunnel 启动并就绪后，还需完成以下步骤：
@@ -220,7 +220,7 @@ pnpm export:source
 
 - [手动配置与维护](docs/SETUP.md)：本机文件、重新配置、Codex Desktop、外部 MCP 和源码导出。
 - [技术参考](docs/REFERENCE.md)：工具、执行权限、HTTP 认证和 Codex 任务模型。
-- [交互式终端与 SSH](docs/INTERACTIVE-TERMINAL.md)：Windows PTY、终端会话、SSH 本地密码输入和安全限制。
+- [交互式终端](docs/INTERACTIVE-TERMINAL.md)：Windows/macOS PTY、终端会话、SSH 本地密码输入和安全限制。
 
 ## 许可证
 

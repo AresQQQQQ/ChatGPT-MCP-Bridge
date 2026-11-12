@@ -11,11 +11,14 @@ export class LocalMcpRegistryError extends Error {
   }
 }
 
+export type LocalMcpRegistrySource = "config" | "runtime";
+
 export interface LocalMcpRegistryEntry {
   readonly workspaceId: string;
   readonly serverId: string;
   readonly url: string;
   readonly loaded: boolean;
+  readonly source: LocalMcpRegistrySource;
 }
 
 interface MutableLocalMcpRegistryEntry {
@@ -23,9 +26,10 @@ interface MutableLocalMcpRegistryEntry {
   serverId: string;
   url: string;
   loaded: boolean;
+  source: LocalMcpRegistrySource;
 }
 
-interface PersistedLocalMcpState {
+interface PersistedLocalMcpStateV1 {
   readonly version: 1;
   readonly servers: readonly {
     readonly workspaceId: string;
@@ -34,7 +38,18 @@ interface PersistedLocalMcpState {
   }[];
 }
 
+interface PersistedLocalMcpStateV2 {
+  readonly version: 2;
+  readonly servers: readonly {
+    readonly workspaceId: string;
+    readonly serverId: string;
+    readonly url: string;
+    readonly loaded: boolean;
+  }[];
+}
+
 const MAX_STATE_BYTES = 1024 * 1024;
+const SERVER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 function registryKey(workspaceId: string, serverId: string): string {
   return `${workspaceId}\u0000${serverId}`;
@@ -42,6 +57,7 @@ function registryKey(workspaceId: string, serverId: string): string {
 
 export class LocalMcpRegistry {
   private readonly entries = new Map<string, MutableLocalMcpRegistryEntry>();
+  private readonly workspaceIds = new Set<string>();
   private operationQueue: Promise<void> = Promise.resolve();
   private stateWarning: string | undefined;
 
@@ -50,17 +66,20 @@ export class LocalMcpRegistry {
     private readonly stateFile?: string,
   ) {
     for (const workspace of config.workspaces) {
+      this.workspaceIds.add(workspace.id);
       for (const [serverId, server] of Object.entries(workspace.mcpServers ?? {})) {
         if (!isLoopbackUrl(server.url)) {
           throw new LocalMcpRegistryError(
             `Configured local MCP server '${workspace.id}/${serverId}' is not loopback-only`,
           );
         }
-        this.entries.set(registryKey(workspace.id, serverId), {
+        const key = registryKey(workspace.id, serverId);
+        this.entries.set(key, {
           workspaceId: workspace.id,
           serverId,
           url: server.url,
           loaded: true,
+          source: "config",
         });
       }
     }
@@ -83,16 +102,55 @@ export class LocalMcpRegistry {
     }
 
     try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("state root is not an object");
-      const record = parsed as Record<string, unknown>;
-      if (record.version !== 1 || !Array.isArray(record.servers)) throw new Error("unsupported state format");
-      for (const item of record.servers) {
-        if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
-        const entry = item as Record<string, unknown>;
-        if (typeof entry.workspaceId !== "string" || typeof entry.serverId !== "string" || typeof entry.loaded !== "boolean") continue;
-        const configured = this.entries.get(registryKey(entry.workspaceId, entry.serverId));
-        if (configured) configured.loaded = entry.loaded;
+      const parsed = JSON.parse(raw) as PersistedLocalMcpStateV1 | PersistedLocalMcpStateV2;
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        (parsed.version !== 1 && parsed.version !== 2) ||
+        !Array.isArray(parsed.servers)
+      ) {
+        throw new Error("unsupported state format");
+      }
+
+      let skipped = 0;
+      for (const item of parsed.servers) {
+        if (
+          typeof item !== "object" ||
+          item === null ||
+          Array.isArray(item) ||
+          typeof item.workspaceId !== "string" ||
+          typeof item.serverId !== "string" ||
+          typeof item.loaded !== "boolean"
+        ) {
+          skipped += 1;
+          continue;
+        }
+        const key = registryKey(item.workspaceId, item.serverId);
+        const configured = this.entries.get(key);
+        if (configured) {
+          configured.loaded = item.loaded;
+          continue;
+        }
+        if (
+          parsed.version !== 2 ||
+          !this.workspaceIds.has(item.workspaceId) ||
+          !SERVER_ID_PATTERN.test(item.serverId) ||
+          typeof item.url !== "string" ||
+          !isLoopbackUrl(item.url)
+        ) {
+          skipped += 1;
+          continue;
+        }
+        this.entries.set(key, {
+          workspaceId: item.workspaceId,
+          serverId: item.serverId,
+          url: item.url,
+          loaded: item.loaded,
+          source: "runtime",
+        });
+      }
+      if (skipped > 0) {
+        this.stateWarning = `Ignored ${skipped} stale or invalid persisted local MCP entr${skipped === 1 ? "y" : "ies"}`;
       }
     } catch (error) {
       this.stateWarning = `Persisted local MCP state was invalid and was ignored; configured defaults were used: ${error instanceof Error ? error.message : String(error)}`;
@@ -140,12 +198,81 @@ export class LocalMcpRegistry {
     return this.setLoaded(workspaceId, serverId, false);
   }
 
+  public register(
+    workspaceId: string,
+    serverId: string,
+    url: string,
+    options: { readonly loaded?: boolean } = {},
+  ): Promise<LocalMcpRegistryEntry> {
+    return this.enqueue(async () => {
+      if (!this.workspaceIds.has(workspaceId)) {
+        throw new LocalMcpRegistryError(`Unknown workspace '${workspaceId}'`);
+      }
+      if (!SERVER_ID_PATTERN.test(serverId)) {
+        throw new LocalMcpRegistryError(
+          "serverId must use letters, numbers, dots, underscores, or hyphens",
+        );
+      }
+      if (!isLoopbackUrl(url)) {
+        throw new LocalMcpRegistryError("Local MCP URL must use a loopback http URL");
+      }
+
+      const key = registryKey(workspaceId, serverId);
+      const existing = this.entries.get(key);
+      if (existing?.source === "config" && existing.url !== url) {
+        throw new LocalMcpRegistryError(
+          `Local MCP '${workspaceId}/${serverId}' is config-managed; edit mcp-bridge.json to change its URL`,
+        );
+      }
+      const entry: MutableLocalMcpRegistryEntry = {
+        workspaceId,
+        serverId,
+        url,
+        loaded: options.loaded ?? true,
+        source: existing?.source === "config" ? "config" : "runtime",
+      };
+      this.entries.set(key, entry);
+      try {
+        await this.persistState();
+      } catch (error) {
+        if (existing) this.entries.set(key, existing);
+        else this.entries.delete(key);
+        throw new LocalMcpRegistryError(
+          `Could not persist local MCP state: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return { ...entry };
+    });
+  }
+
+  public remove(workspaceId: string, serverId: string): Promise<LocalMcpRegistryEntry> {
+    return this.enqueue(async () => {
+      const key = registryKey(workspaceId, serverId);
+      const existing = this.requireEntry(workspaceId, serverId);
+      if (existing.source === "config") {
+        throw new LocalMcpRegistryError(
+          `Local MCP '${workspaceId}/${serverId}' is config-managed; edit mcp-bridge.json and restart Bridge to remove it`,
+        );
+      }
+      this.entries.delete(key);
+      try {
+        await this.persistState();
+      } catch (error) {
+        this.entries.set(key, existing);
+        throw new LocalMcpRegistryError(
+          `Could not persist local MCP state: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return { ...existing };
+    });
+  }
+
   public isLoaded(workspaceId: string, serverId: string): boolean {
     return this.requireEntry(workspaceId, serverId).loaded;
   }
 
   private setLoaded(workspaceId: string, serverId: string, loaded: boolean): Promise<LocalMcpRegistryEntry> {
-    const operation = this.operationQueue.then(async () => {
+    return this.enqueue(async () => {
       const entry = this.requireEntry(workspaceId, serverId);
       const previousLoaded = entry.loaded;
       entry.loaded = loaded;
@@ -159,15 +286,24 @@ export class LocalMcpRegistry {
       }
       return { ...entry };
     });
-    this.operationQueue = operation.then(() => undefined, () => undefined);
-    return operation;
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.operationQueue.then(operation);
+    this.operationQueue = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   private async persistState(): Promise<void> {
     if (!this.stateFile) return;
-    const state: PersistedLocalMcpState = {
-      version: 1,
-      servers: this.list().map(({ workspaceId, serverId, loaded }) => ({ workspaceId, serverId, loaded })),
+    const state: PersistedLocalMcpStateV2 = {
+      version: 2,
+      servers: this.list().map(({ workspaceId, serverId, url, loaded }) => ({
+        workspaceId,
+        serverId,
+        url,
+        loaded,
+      })),
     };
     const directory = path.dirname(this.stateFile);
     const temporary = `${this.stateFile}.${process.pid}.${Date.now()}.tmp`;

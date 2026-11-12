@@ -41,3 +41,11 @@ test("Windows log panel supports auto-follow and restores the previous scroll po
   assert.match(source, /\$followLogs = .*IsChecked -eq \$true/u);
   assert.match(source, /ScrollToVerticalOffset/u);
 });
+test("Windows local MCP panel separates registration, proxy enablement, and reachability", async () => {
+  const source = await readFile(path.resolve("src/ui/windows-console.ts"), "utf8");
+  assert.match(source, /\$localMcpCountText\.Text=\$count\.ToString\(\)/u);
+  assert.match(source, /代理启用只表示 Bridge 允许转发，不代表下游进程在线/u);
+  assert.match(source, /local-mcp-register:/u);
+  assert.match(source, /LocalMcpRemoveButton/u);
+  assert.match(source, /LocalMcpControllerView/u);
+});

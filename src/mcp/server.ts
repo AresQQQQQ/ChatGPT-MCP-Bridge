@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import path from "node:path";
 
 import {
   BRIDGE_CAPABILITIES,
@@ -24,8 +23,6 @@ import { callLocalMcpTool, listLocalMcpTools, LocalMcpProxyError } from "./local
 import { LocalMcpRegistry, LocalMcpRegistryError } from "./local-mcp-registry.js";
 import { PathSecurityError } from "../security/path-sandbox.js";
 import { registerTerminalTools } from "../terminal/mcp-terminal-tools.js";
-import { registerSavedSshTools } from "../terminal/mcp-ssh-tools.js";
-import { SavedSshHostManager } from "../terminal/saved-ssh-hosts.js";
 import { TerminalSessionManager } from "../terminal/terminal-sessions.js";
 import {
   PatchApplicationError,
@@ -269,11 +266,10 @@ export function createMcpServer(
   worktreeCheckpoints: WorktreeCheckpointStore = new WorktreeCheckpointStore(),
   localMcpRegistry: LocalMcpRegistry = new LocalMcpRegistry(config),
   terminalSessions: TerminalSessionManager = new TerminalSessionManager(),
-  sshHosts: SavedSshHostManager = new SavedSshHostManager(path.join(path.dirname(config.configPath), ".mcp-bridge-state", "ssh-hosts.json")),
 ): McpServer {
   const server = new McpServer(
     { name: "chatgpt-mcp-bridge", version: "0.1.0" },
-    { instructions: "Pass an explicitly configured workspaceId to every tool. open_workspace is optional metadata/context discovery; it does not grant access. All paths are workspace-relative. Prefer apply_patch over write_file for existing files. Never request secrets or blocked paths. Standard command execution is limited to configured package scripts and Controlled Recipes. Workspaces explicitly configured as trusted-dev additionally permit trusted host developer execution and normal interactive desktop launches; those capabilities are not OS sandboxes." },
+    { instructions: "Pass an explicitly configured workspaceId to every tool. open_workspace is optional metadata/context discovery; it does not grant access. All paths are workspace-relative. Prefer apply_patch over write_file for existing files. Never request secrets or blocked paths. Standard command execution is limited to configured package scripts and Controlled Recipes. Workspaces explicitly configured as trusted-dev additionally permit trusted host developer execution and normal interactive desktop launches; those capabilities are not OS sandboxes. For SSH hosts managed by a configured local SSH MCP server, use mcp_call_tool and that server's session-* tools; do not start a native ssh client through terminal_start unless the user explicitly requests an unmanaged terminal." },
   );
   const commands = new ControlledCommandRunner();
   const trustedDevCommands = new TrustedDevCommandRunner();
@@ -281,7 +277,6 @@ export function createMcpServer(
   const recipes = new RecipeRunner();
   const processes = new ProcessInspector();
   registerTerminalTools(server, registry, terminalSessions);
-  registerSavedSshTools(server, registry, terminalSessions, sshHosts);
   const requireCodex = (): CodexTaskManager => {
     if (!codex) throw new CodexBridgeError("Codex integration is not enabled for this Bridge");
     return codex;
@@ -289,7 +284,7 @@ export function createMcpServer(
 
   server.registerTool("mcp_server_list", {
     title: "List local MCP servers",
-    description: "List configured loopback MCP servers and whether each one is currently loaded in the Bridge runtime registry.",
+    description: "List registered loopback MCP servers. The loaded field only means Bridge proxy access is enabled; it does not mean the downstream process is running or reachable.",
     inputSchema: z.object({ workspaceId: workspaceIdSchema.optional() }).strict(),
     outputSchema: z.object({
       servers: z.array(z.object({
@@ -297,6 +292,7 @@ export function createMcpServer(
         serverId: z.string(),
         url: z.string(),
         loaded: z.boolean(),
+        source: z.enum(["config", "runtime"]),
       })),
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -312,12 +308,18 @@ export function createMcpServer(
 
   server.registerTool("mcp_server_load", {
     title: "Load local MCP server",
-    description: "Enable proxy access to one configured loopback MCP server without starting or owning its process.",
+    description: "Enable proxy access to one registered loopback MCP server without starting or owning its process. This does not prove the downstream server is reachable.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       serverId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u),
     }).strict(),
-    outputSchema: z.object({ workspaceId: z.string(), serverId: z.string(), url: z.string(), loaded: z.boolean() }),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      serverId: z.string(),
+      url: z.string(),
+      loaded: z.boolean(),
+      source: z.enum(["config", "runtime"]),
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ workspaceId, serverId }) => {
     try {
@@ -329,17 +331,74 @@ export function createMcpServer(
 
   server.registerTool("mcp_server_unload", {
     title: "Unload local MCP server",
-    description: "Disable proxy access to one configured loopback MCP server without stopping or modifying its process.",
+    description: "Disable proxy access to one registered loopback MCP server without stopping or modifying its process.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       serverId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u),
     }).strict(),
-    outputSchema: z.object({ workspaceId: z.string(), serverId: z.string(), url: z.string(), loaded: z.boolean() }),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      serverId: z.string(),
+      url: z.string(),
+      loaded: z.boolean(),
+      source: z.enum(["config", "runtime"]),
+    }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ workspaceId, serverId }) => {
     try {
       const entry = await localMcpRegistry.unload(workspaceId, serverId);
       const structuredContent = { ...entry };
+      return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
+    } catch (error) { return toolError(error); }
+  });
+
+  server.registerTool("mcp_server_register", {
+    title: "Register local MCP server",
+    description: "Persist and register a loopback MCP server in the running Bridge registry without restarting Bridge. Runtime registrations survive Bridge restarts.",
+    inputSchema: z.object({
+      workspaceId: workspaceIdSchema,
+      serverId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u),
+      url: z.string().url(),
+      loaded: z.boolean().optional().default(true),
+    }).strict(),
+    outputSchema: z.object({
+      workspaceId: z.string(),
+      serverId: z.string(),
+      url: z.string(),
+      loaded: z.boolean(),
+      source: z.enum(["config", "runtime"]),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ workspaceId, serverId, url, loaded }) => {
+    try {
+      const entry = await localMcpRegistry.register(workspaceId, serverId, url, { loaded });
+      const structuredContent = { ...entry };
+      return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
+    } catch (error) { return toolError(error); }
+  });
+
+  server.registerTool("mcp_server_remove", {
+    title: "Remove runtime local MCP server",
+    description: "Remove a runtime-registered loopback MCP server from the running Bridge registry without restarting Bridge. Servers declared in mcp-bridge.json must be removed from config instead.",
+    inputSchema: z.object({
+      workspaceId: workspaceIdSchema,
+      serverId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u),
+    }).strict(),
+    outputSchema: z.object({
+      removed: z.literal(true),
+      entry: z.object({
+        workspaceId: z.string(),
+        serverId: z.string(),
+        url: z.string(),
+        loaded: z.boolean(),
+        source: z.enum(["config", "runtime"]),
+      }),
+    }),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, async ({ workspaceId, serverId }) => {
+    try {
+      const entry = await localMcpRegistry.remove(workspaceId, serverId);
+      const structuredContent = { removed: true as const, entry };
       return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
     } catch (error) { return toolError(error); }
   });
@@ -357,15 +416,18 @@ export function createMcpServer(
       loaded: z.boolean(),
       reachable: z.boolean(),
       toolCount: z.number().int().nonnegative(),
+      source: z.enum(["config", "runtime"]),
       error: z.string().optional(),
     }),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   }, async ({ workspaceId, serverId }) => {
     try {
       const wasLoaded = localMcpRegistry.isLoaded(workspaceId, serverId);
+      const source = localMcpRegistry.list(workspaceId).find((entry) => entry.serverId === serverId)?.source;
+      if (!source) throw new LocalMcpRegistryError("Unknown local MCP server");
       try {
         const result = await listLocalMcpTools(localMcpRegistry, workspaceId, serverId, { requireLoaded: false });
-        const structuredContent = { workspaceId, serverId, loaded: wasLoaded, reachable: true, toolCount: result.tools.length };
+        const structuredContent = { workspaceId, serverId, loaded: wasLoaded, reachable: true, toolCount: result.tools.length, source };
         return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
       } catch (error) {
         const structuredContent = {
@@ -374,6 +436,7 @@ export function createMcpServer(
           loaded: wasLoaded,
           reachable: false,
           toolCount: 0,
+          source,
           error: errorText(error),
         };
         return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };

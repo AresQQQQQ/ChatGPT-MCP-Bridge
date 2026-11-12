@@ -57,7 +57,7 @@ test("Codex-enabled workspaces expose the bounded Codex MCP tools without changi
     client = new Client({ name: "codex-tool-contract", version: "0.1.0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`)));
     const tools = await client.listTools();
-    assert.equal(tools.tools.length, 76);
+    assert.equal(tools.tools.length, 74);
     const names = new Set(tools.tools.map((tool) => tool.name));
     for (const name of [
       "codex_get_status",
@@ -211,6 +211,8 @@ test("Express endpoint completes MCP handshake and exposes the file tools", asyn
         "mcp_server_list",
         "mcp_server_load",
         "mcp_server_probe",
+        "mcp_server_register",
+        "mcp_server_remove",
         "mcp_server_unload",
         "mkdir_p",
         "move_path",
@@ -221,10 +223,6 @@ test("Express endpoint completes MCP handshake and exposes the file tools", asyn
         "render_pdf_page",
         "search",
         "snapshot_tree",
-        "ssh_host_list",
-        "ssh_host_remove",
-        "ssh_host_save",
-        "ssh_start_saved",
         "stat_file",
         "stat_files",
         "terminal_close",

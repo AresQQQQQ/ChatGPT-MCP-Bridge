@@ -82,6 +82,56 @@ test("local MCP loaded state persists across registry restarts and ignores stale
   }
 });
 
+test("runtime local MCP registrations persist and config entries remain restart-managed", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "mcp-registry-runtime-"));
+  const stateFile = path.join(tempRoot, ".mcp-bridge-state", "local-mcp.json");
+  const config: BridgeConfig = {
+    host: "127.0.0.1",
+    port: 0,
+    mcpPath: "/mcp",
+    maxReadBytes: 1024,
+    workspaces: [{
+      id: "demo",
+      root: tempRoot,
+      mcpServers: { fixed: { url: "http://127.0.0.1:3011/mcp" } },
+    }],
+    configPath: path.join(tempRoot, "mcp-bridge.json"),
+  };
+
+  try {
+    const first = new LocalMcpRegistry(config, stateFile);
+    await first.initialize();
+    const registered = await first.register("demo", "dynamic", "http://127.0.0.1:3022/mcp");
+    assert.equal(registered.source, "runtime");
+    assert.equal(registered.loaded, true);
+    await first.unload("demo", "dynamic");
+    await assert.rejects(
+      first.remove("demo", "fixed"),
+      /config-managed/u,
+    );
+    await assert.rejects(
+      first.register("demo", "fixed", "http://127.0.0.1:3023/mcp"),
+      /config-managed/u,
+    );
+
+    const second = new LocalMcpRegistry(config, stateFile);
+    await second.initialize();
+    assert.deepEqual(
+      second.list("demo").map(({ serverId, loaded, source }) => ({ serverId, loaded, source })),
+      [
+        { serverId: "dynamic", loaded: false, source: "runtime" },
+        { serverId: "fixed", loaded: true, source: "config" },
+      ],
+    );
+    await second.remove("demo", "dynamic");
+    const third = new LocalMcpRegistry(config, stateFile);
+    await third.initialize();
+    assert.deepEqual(third.list("demo").map((entry) => entry.serverId), ["fixed"]);
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("configured local MCP proxy lists and calls loopback tools", async () => {
   const downstreamApp = express();
   downstreamApp.use(express.json({ limit: "1mb" }));
@@ -159,13 +209,14 @@ test("configured local MCP proxy lists and calls loopback tools", async () => {
     });
     assert.equal(initialServers.isError, undefined);
     const initialServerContent = initialServers.structuredContent as {
-      servers?: Array<{ serverId?: string; loaded?: boolean }>;
+      servers?: Array<{ serverId?: string; loaded?: boolean; source?: string }>;
     } | undefined;
     assert.deepEqual(initialServerContent?.servers, [{
       workspaceId: "demo",
       serverId: "local",
       url: `http://127.0.0.1:${downstreamPort}/mcp`,
       loaded: true,
+      source: "config",
     }]);
 
     const unloaded = await client.callTool({
@@ -237,6 +288,41 @@ test("configured local MCP proxy lists and calls loopback tools", async () => {
       structuredContent?: { echoed?: string };
     } | undefined;
     assert.equal(calledAfterLoadContent?.structuredContent?.echoed, "hot-load-ok");
+
+    const registered = await client.callTool({
+      name: "mcp_server_register",
+      arguments: {
+        workspaceId: "demo",
+        serverId: "hot",
+        url: `http://127.0.0.1:${downstreamPort}/mcp`,
+        loaded: true,
+      },
+    });
+    assert.equal(registered.isError, undefined);
+    assert.equal((registered.structuredContent as { source?: string } | undefined)?.source, "runtime");
+
+    const hotListed = await client.callTool({
+      name: "mcp_list_tools",
+      arguments: { workspaceId: "demo", serverId: "hot" },
+    });
+    assert.equal(hotListed.isError, undefined);
+    assert.equal(
+      (hotListed.structuredContent as { tools?: Array<{ name?: string }> } | undefined)?.tools?.[0]?.name,
+      "echo_value",
+    );
+
+    const removed = await client.callTool({
+      name: "mcp_server_remove",
+      arguments: { workspaceId: "demo", serverId: "hot" },
+    });
+    assert.equal(removed.isError, undefined);
+    assert.equal((removed.structuredContent as { removed?: boolean } | undefined)?.removed, true);
+
+    const removedProbe = await client.callTool({
+      name: "mcp_server_probe",
+      arguments: { workspaceId: "demo", serverId: "hot" },
+    });
+    assert.equal(removedProbe.isError, true);
   } finally {
     await client.close().catch(() => undefined);
     await bridge.close().catch(() => undefined);

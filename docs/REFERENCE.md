@@ -39,7 +39,9 @@ Wait for both `READY` lines, then connect your MCP client using your tunnel conf
 
 This repository contains the Bridge source, tests, UI assets, dependency lockfile, and launch scripts. The Windows UI and Codex Desktop integration require Windows; the core HTTP Bridge can run separately.
 
-Locally attached (hot-loaded) MCP servers are separate projects. Their implementations, dependencies, credentials, and data are **not included**. The generic proxy/registry code in `src/mcp/local-mcp-*.ts` belongs to the Bridge and is included. Server URLs under `workspaces[].mcpServers` stay in the ignored `mcp-bridge.json`; loaded/unloaded state stays in `.mcp-bridge-state/`. Keep external server projects outside this checkout, or under the ignored `local-mcps/` or `mounted-mcps/` directories.
+Locally attached MCP servers are separate projects. Their implementations, dependencies, credentials, and data are **not included**. The generic proxy/registry code in `src/mcp/local-mcp-*.ts` belongs to the Bridge and is included. `loaded` only controls whether Bridge proxy access is enabled; it does not mean the downstream process is running or reachable. Use probe to distinguish proxy configuration from downstream availability.
+
+Runtime loopback registrations created by `mcp_server_register` or the Windows UI persist in `.mcp-bridge-state/` and can be removed with `mcp_server_remove` without restarting Bridge. URLs declared under `workspaces[].mcpServers` in `mcp-bridge.json` are config-managed: changing or removing those requires a Bridge restart. Keep external server projects outside this checkout, or under the ignored `local-mcps/` or `mounted-mcps/` directories.
 
 To prepare a clean source folder for a new GitHub repository:
 

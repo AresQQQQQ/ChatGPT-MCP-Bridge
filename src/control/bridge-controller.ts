@@ -55,6 +55,8 @@ interface ListeningBridge {
   readonly listLocalMcpServers: () => readonly LocalMcpRegistryEntry[];
   readonly loadLocalMcpServer: (workspaceId: string, serverId: string) => Promise<LocalMcpRegistryEntry>;
   readonly unloadLocalMcpServer: (workspaceId: string, serverId: string) => Promise<LocalMcpRegistryEntry>;
+  readonly registerLocalMcpServer: (workspaceId: string, serverId: string, url: string) => Promise<LocalMcpRegistryEntry>;
+  readonly removeLocalMcpServer: (workspaceId: string, serverId: string) => Promise<LocalMcpRegistryEntry>;
   readonly probeLocalMcpServer: (workspaceId: string, serverId: string) => Promise<{ readonly toolCount: number; readonly latencyMs: number }>;
   close(): Promise<void>;
 }
@@ -114,6 +116,10 @@ export async function listenBridge(config: BridgeConfig, logSink?: BridgeHttpLog
     listLocalMcpServers: () => bridge.localMcpRegistry.list(),
     loadLocalMcpServer: (workspaceId: string, serverId: string) => bridge.localMcpRegistry.load(workspaceId, serverId),
     unloadLocalMcpServer: (workspaceId: string, serverId: string) => bridge.localMcpRegistry.unload(workspaceId, serverId),
+    registerLocalMcpServer: (workspaceId: string, serverId: string, url: string) =>
+      bridge.localMcpRegistry.register(workspaceId, serverId, url),
+    removeLocalMcpServer: (workspaceId: string, serverId: string) =>
+      bridge.localMcpRegistry.remove(workspaceId, serverId),
     probeLocalMcpServer: async (workspaceId: string, serverId: string) => {
       const startedAt = Date.now();
       const result = await listLocalMcpTools(
@@ -258,6 +264,7 @@ export class BridgeController {
           serverId,
           url: server.url,
           loaded: false,
+          source: "config" as const,
         }),
       ));
     }
@@ -285,6 +292,29 @@ export class BridgeController {
     if (!this.bridge || this.state !== "running") throw new Error("Bridge 未运行，无法卸载本地 MCP");
     const entry = await this.bridge.unloadLocalMcpServer(workspaceId, serverId);
     this.addLog("controller", "stdout", `已卸载本地 MCP：${workspaceId}/${serverId}`);
+    return entry;
+  }
+
+  public async registerLocalMcpServer(
+    workspaceId: string,
+    serverId: string,
+    url: string,
+  ): Promise<LocalMcpRegistryEntry> {
+    if (!this.bridge || this.state !== "running") throw new Error("Bridge 未运行，无法热注册本地 MCP");
+    const entry = await this.bridge.registerLocalMcpServer(workspaceId, serverId, url);
+    this.localMcpProbeCache.delete(localMcpKey(workspaceId, serverId));
+    this.addLog("controller", "stdout", `已热注册本地 MCP：${workspaceId}/${serverId} · ${url}`);
+    return entry;
+  }
+
+  public async removeLocalMcpServer(
+    workspaceId: string,
+    serverId: string,
+  ): Promise<LocalMcpRegistryEntry> {
+    if (!this.bridge || this.state !== "running") throw new Error("Bridge 未运行，无法移除本地 MCP");
+    const entry = await this.bridge.removeLocalMcpServer(workspaceId, serverId);
+    this.localMcpProbeCache.delete(localMcpKey(workspaceId, serverId));
+    this.addLog("controller", "stdout", `已移除热注册 MCP：${workspaceId}/${serverId}`);
     return entry;
   }
 

@@ -141,6 +141,7 @@ test("concurrent PTY starts enforce the per-workspace reservation limit", async 
 
 test("Windows local password dialog script has valid PowerShell syntax", { skip: process.platform !== "win32" }, () => {
   // Only parse the script. Do not open a window or request a real password in CI.
+  assert.match(PASSWORD_UI_SCRIPT, /MCP Bridge - 原生 SSH PTY 密码输入/u);
   const source = Buffer.from(PASSWORD_UI_SCRIPT, "utf16le").toString("base64");
   const script = [
     "$text = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('" + source + "'))",
@@ -183,6 +184,14 @@ test("MCP PTY terminal keeps working across stateless HTTP requests", { skip: pr
     for (const name of ["terminal_start", "terminal_read", "terminal_write", "terminal_local_password", "terminal_list", "terminal_close"]) {
       assert.ok(tools.tools.some((tool) => tool.name === name), name + " missing");
     }
+    assert.match(
+      tools.tools.find((tool) => tool.name === "terminal_start")?.description ?? "",
+      /mcp_call_tool.*session-\*/u,
+    );
+    assert.match(
+      tools.tools.find((tool) => tool.name === "terminal_local_password")?.description ?? "",
+      /not part of the classfang SSH MCP flow/u,
+    );
     const denied = await client.callTool({
       name: "terminal_start",
       arguments: { workspaceId: "readonly", executable: "cmd.exe" },

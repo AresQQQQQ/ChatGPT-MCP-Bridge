@@ -41,7 +41,13 @@ function createHarness(overrides: { delayedStart?: boolean } = {}) {
   let tunnelStops = 0;
   let mcpProbes = 0;
   let tunnelProbes = 0;
-  let localMcpLoaded = true;
+  let localMcpEntries = [{
+    workspaceId: "demo",
+    serverId: "local",
+    url: "http://127.0.0.1:3011/mcp",
+    loaded: true,
+    source: "config" as const,
+  }];
   const child = childEmitter();
   let releaseBridge: (() => void) | undefined;
   const bridgeGate = overrides.delayedStart
@@ -58,19 +64,27 @@ function createHarness(overrides: { delayedStart?: boolean } = {}) {
         await bridgeGate;
         return {
           url: "http://127.0.0.1:3000/mcp",
-          listLocalMcpServers: () => [{
-            workspaceId: "demo",
-            serverId: "local",
-            url: "http://127.0.0.1:3011/mcp",
-            loaded: localMcpLoaded,
-          }],
+          listLocalMcpServers: () => localMcpEntries,
           loadLocalMcpServer: () => {
-            localMcpLoaded = true;
-            return { workspaceId: "demo", serverId: "local", url: "http://127.0.0.1:3011/mcp", loaded: true };
+            localMcpEntries = localMcpEntries.map((entry) =>
+              entry.serverId === "local" ? { ...entry, loaded: true } : entry);
+            return localMcpEntries.find((entry) => entry.serverId === "local")!;
           },
           unloadLocalMcpServer: () => {
-            localMcpLoaded = false;
-            return { workspaceId: "demo", serverId: "local", url: "http://127.0.0.1:3011/mcp", loaded: false };
+            localMcpEntries = localMcpEntries.map((entry) =>
+              entry.serverId === "local" ? { ...entry, loaded: false } : entry);
+            return localMcpEntries.find((entry) => entry.serverId === "local")!;
+          },
+          registerLocalMcpServer: (workspaceId, serverId, url) => {
+            const entry = { workspaceId, serverId, url, loaded: true, source: "runtime" as const };
+            localMcpEntries = [...localMcpEntries.filter((candidate) => candidate.serverId !== serverId), entry];
+            return entry;
+          },
+          removeLocalMcpServer: (workspaceId, serverId) => {
+            const entry = localMcpEntries.find((candidate) => candidate.serverId === serverId);
+            if (!entry) throw new Error("missing");
+            localMcpEntries = localMcpEntries.filter((candidate) => candidate.serverId !== serverId);
+            return entry;
           },
           probeLocalMcpServer: async () => ({ toolCount: 10, latencyMs: 7 }),
           close: async () => { bridgeStops += 1; },
@@ -163,6 +177,25 @@ test("controller UI local MCP controls share the live runtime registry", async (
 
   harness.controller.loadLocalMcpServer("demo", "local");
   assert.equal((await harness.controller.getLocalMcpServers())[0]?.loaded, true);
+
+  const registered = await harness.controller.registerLocalMcpServer(
+    "demo",
+    "runtime",
+    "http://127.0.0.1:3022/mcp",
+  );
+  assert.equal(registered.source, "runtime");
+  assert.deepEqual(
+    (await harness.controller.getLocalMcpServers()).map(({ serverId, source }) => ({ serverId, source })),
+    [
+      { serverId: "local", source: "config" },
+      { serverId: "runtime", source: "runtime" },
+    ],
+  );
+  await harness.controller.removeLocalMcpServer("demo", "runtime");
+  assert.deepEqual(
+    (await harness.controller.getLocalMcpServers()).map((entry) => entry.serverId),
+    ["local"],
+  );
 });
 
 test("controller caches MCP and tunnel health probes between frequent UI status reads", async () => {

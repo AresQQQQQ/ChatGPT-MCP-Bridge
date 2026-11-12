@@ -316,7 +316,7 @@ export class TerminalSessionManager {
     if (session.pendingPassword) throw new TerminalSessionError("Password prompt is already open");
     session.pendingPassword = true;
     try {
-      const password = await this.localPasswordPrompt("SSH 密码 - " + session.workspaceId);
+      const password = await this.localPasswordPrompt("原生 SSH PTY 密码 - " + session.workspaceId);
       if (password === null) return { submitted: false };
       if (!password || password.length > MAX_INPUT_CHARS || /[\r\n\u0000]/u.test(password)) {
         throw new TerminalSessionError("Invalid local password input");

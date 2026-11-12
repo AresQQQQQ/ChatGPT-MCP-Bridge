@@ -126,7 +126,7 @@ pnpm run ui 和 node dist/cli.js ui 只启动已有产物，不负责首次安�
 - **服务：** 启动、停止和重新启动，⌘R 启动、⌘. 停止，⌘Q 或关闭窗口退出；⌘⇧R 重新载入控制台。
 - **项目：** 项目/Module 选择、搜索、添加/移除配置、编辑 ID/路径/权限、原生 NSOpenPanel 文件夹选择。保存只在服务停止时允许，保留其他配置字段，并拒绝覆盖已被其他程序修改的配置。
 - **Codex：** 显示当前绑定、长期/临时 Module、Thread 与 Desktop Owner，提供刷新和解除绑定。解除绑定保留对话。当前本机工作区未启用 Codex，这部分未做真实 Desktop IPC 操作验证。
-- **本地 MCP：** 显示配置服务、加载状态、检测结果，支持检测、加载、卸载。检测/卸载/重新加载已通过临时回环 MCP 服务实际验证，测试配置随后清除。
+- **本地 MCP：** 分别显示登记数量、代理启用、可达/不可达和未检测状态，支持热注册、检测、启用/停用代理和移除运行时登记。`loaded` 不代表下游在线，必须通过 probe 才能确认可达。
 - **日志：** 实时更新、来源/文本筛选、自动滚动、复制与清空视图；保留后端日志，显示内容已脱敏。浅色/深色样式随系统偏好，深色视觉尚未在本机切换系统外观实测。
 
 控制 HTTP 监听器只绑定 `127.0.0.1` 的随机端口，使用每次启动随机凭据、固定 Host/Origin 检查、严格动作 schema 与 CSP；不提供通用命令执行接口。界面快照不包含 `.env`、原始配置或 Tunnel profile。WebKit 只允许当前回环 origin 的页面导航，原生文件夹选择消息仅接受主页面。
@@ -153,7 +153,9 @@ UI 打开时默认处于停止状态，先点击“启动服务”。应用不�
 
 **Codex Desktop：** 需要本机 Codex Desktop 可用并保持运行。在配置顶层添加 `"codex": {}`，目标工作区中添加 `"codex": {"enabled": true, "modules": {"general": "General"}}`。重启 Bridge、刷新应用工具列表后使用。先查询模块和已有对话，再明确选择创建或继续任务。详见 [Codex 任务模型](REFERENCE.md#codex-task-model)。
 
-**热挂载 MCP：** 外部服务独立安装、运行；Bridge 保存工作区下 `mcpServers` 的回环 HTTP 地址并代理调用。它们的实现和数据不在这个公开仓库内。不要把外部 MCP 工程复制到 `src` 或 `test`；如需放在仓库目录下，使用已忽略的 `local-mcps/` 或 `mounted-mcps/`。
+**热挂载 MCP：** 外部服务独立安装、运行；Bridge 保存回环 HTTP 地址并代理调用。运行时可用 `mcp_server_register` 或 UI 热注册新的回环 URL，用 `mcp_server_remove` 移除，均不需要重启 Bridge，并持久化到 `.mcp-bridge-state/`。`mcp-bridge.json` 中声明的 config-managed 条目修改 URL 或移除仍需更新配置并重启。
+
+外部 MCP 的实现和数据不在这个公开仓库内。不要把外部 MCP 工程复制到 `src` 或 `test`；如需放在仓库目录下，使用已忽略的 `local-mcps/` 或 `mounted-mcps/`。
 
 ## 仅运行本地 HTTP Bridge
 

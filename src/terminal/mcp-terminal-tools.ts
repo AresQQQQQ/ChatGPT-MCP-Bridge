@@ -51,7 +51,7 @@ export function registerTerminalTools(
 
   server.registerTool("terminal_start", {
     title: "Start interactive terminal",
-    description: "Start a long-lived PTY process in a trusted-dev workspace. For SSH use the platform client (ssh.exe on Windows or /usr/bin/ssh on macOS) and normal argv. The session survives individual MCP requests. Passwords must not be placed in args; use terminal_local_password for SSH password prompts.",
+    description: "Start a long-lived local PTY process in a trusted-dev workspace. For an SSH host managed by a configured local MCP server, do not launch ssh.exe; use mcp_call_tool with that SSH server's session-* tools instead. Use a native SSH client here only when the user explicitly requests an unmanaged/manual terminal. The session survives individual MCP requests. Passwords must not be placed in args.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       executable: z.string().min(1).max(4096),
@@ -108,7 +108,7 @@ export function registerTerminalTools(
 
   server.registerTool("terminal_write", {
     title: "Send interactive terminal input",
-    description: "Write normal terminal keystrokes or commands to an existing PTY. Do not send secrets or passwords in this tool: arguments can be visible to the MCP client and logs. For SSH passwords use terminal_local_password.",
+    description: "Write normal terminal keystrokes or commands to an existing PTY. Do not send secrets or passwords in this tool: arguments can be visible to the MCP client and logs. This tool does not access classfang-managed SSH authentication.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       sessionId: sessionIdSchema,
@@ -124,8 +124,8 @@ export function registerTerminalTools(
   });
 
   server.registerTool("terminal_local_password", {
-    title: "Enter SSH password locally",
-    description: "Only for a running native SSH PTY displaying a recent password/passphrase prompt. Opens a local hidden-password dialog on the Bridge desktop. The user types locally: the secret is written directly to the SSH process, never returned to MCP or logged. Requires an interactive Windows or macOS desktop.",
+    title: "Enter password for unmanaged native SSH PTY",
+    description: "Only for a running native OpenSSH process launched explicitly through terminal_start. This is not part of the classfang SSH MCP flow and must not be used for hosts managed by that server. Opens a local hidden-password dialog on the Bridge desktop. The user types locally: the secret is written directly to the SSH process, never returned to MCP or logged. Requires an interactive Windows or macOS desktop.",
     inputSchema: z.object({
       workspaceId: workspaceIdSchema,
       sessionId: sessionIdSchema,

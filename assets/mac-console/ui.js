@@ -10,7 +10,7 @@ if (location.hash) { sessionStorage.setItem(tokenKey, credential); history.repla
 let snapshot, selected, selectedModule, draft, editRevision, lastSelection, activeTab = "details", localBusy = false;
 let chainSignature = "", treeSignature = "", detailsSignature = "", mcpsSignature = "", globalMcpsSignature = "";
 let sourceFilter = "all", clearedThrough = "", visibleLogs = [], logSignature = "", toastTimer, expired = false;
-let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, globalMcpOpen = false, codexDefaultsOpen = false, codexDefaultsInitialized = false, sshHostsOpen = false, sshHostFormOpen = false, sshHostBusy = false, sshHostEditing = undefined, sshHosts = [], sshHostsLoaded = false, lastCommandError = "";
+let setupOpen = false, setupInitialized = false, lastSetupSuccess = false, settingsOpen = false, settingsInitialized = false, globalMcpOpen = false, codexDefaultsOpen = false, codexDefaultsInitialized = false, lastCommandError = "";
 
 function toast(message) { $("toast").textContent = message; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").hidden = true, 4200); }
 async function request(route, body) {
@@ -152,7 +152,7 @@ function renderModule(w, m) {
 function renderMcps(w) {
   const servers = snapshot.localMcpServers.filter(s=>s.workspaceId===w.id);
   const signature = JSON.stringify([servers, w.id, snapshot.status.state, localBusy, snapshot.busy]); if (signature === mcpsSignature) return; mcpsSignature = signature;
-  $("mcps").innerHTML = servers.length ? servers.map(s=>`<div class="mcp-card"><div class="mcp-heading"><h3>${escape(s.serverId)}</h3><span class="badge ${s.loaded?"good":""}">${s.loaded?"已加载":"未加载"}</span></div><p class="mono">${escape(s.url)}</p><div class="mcp-actions"><button data-mcp="local-mcp-probe" data-server="${escape(s.serverId)}">检测</button><button data-mcp="${s.loaded?"local-mcp-unload":"local-mcp-load"}" data-server="${escape(s.serverId)}" class="${s.loaded?"danger":"primary"}">${s.loaded?"卸载":"加载"}</button><span>${s.probeStatus==="available"?`${s.toolCount || 0} tools · ${s.latencyMs || 0}ms`:s.probeStatus==="unavailable"?"检测失败":"尚未检测"}</span></div>${s.probeError?`<p>${escape(s.probeError)}</p>`:""}</div>`).join("") : '<div class="empty-state"><span aria-hidden="true">⊞</span><h3>还没有本地 MCP</h3><p>在项目的 mcpServers 配置中添加回环服务地址。<br>配置完成后启动 Bridge，即可在这里检测与管理。</p></div>';
+  $("mcps").innerHTML = servers.length ? servers.map(s=>`<div class="mcp-card"><div class="mcp-heading"><h3>${escape(s.serverId)}</h3><span class="badge ${s.loaded?"good":""}">${s.loaded?"代理开":"代理关"}</span><span class="badge">${s.source==="runtime"?"热注册":"配置"}</span></div><p class="mono">${escape(s.url)}</p><div class="mcp-actions"><button data-mcp="local-mcp-probe" data-server="${escape(s.serverId)}">检测</button><button data-mcp="${s.loaded?"local-mcp-unload":"local-mcp-load"}" data-server="${escape(s.serverId)}" class="${s.loaded?"danger":"primary"}">${s.loaded?"停用代理":"启用代理"}</button><span>${s.probeStatus==="available"?`可达 · ${s.toolCount || 0} tools · ${s.latencyMs || 0}ms`:s.probeStatus==="unavailable"?"不可达":"尚未检测"}</span></div>${s.probeError?`<p>${escape(s.probeError)}</p>`:""}</div>`).join("") : '<div class="empty-state"><span aria-hidden="true">⊞</span><h3>还没有本地 MCP</h3><p>在项目的 mcpServers 配置中添加回环服务地址。<br>配置完成后启动 Bridge，即可在这里检测与管理。</p></div>';
   $("mcps").querySelectorAll("[data-mcp]").forEach(button=>{button.disabled=snapshot.status.state!=="running"||localBusy||snapshot.busy;button.addEventListener("click",()=>command(button.dataset.mcp,{workspaceId:w.id,serverId:button.dataset.server}));});
 }
 function renderGlobalMcps() {
@@ -160,10 +160,11 @@ function renderGlobalMcps() {
   const servers = [...(snapshot.localMcpServers || [])];
   const loadedCount = servers.filter(server => server.loaded).length;
   const workspaceIds = new Set(servers.map(server => server.workspaceId));
-  $("global-mcp-count").textContent = `${loadedCount}/${servers.length}`;
-  $("global-mcp-count").title = `${loadedCount} 个已加载，${servers.length} 个已配置`;
+  const reachableCount = servers.filter(server => server.probeStatus === "available").length;
+  $("global-mcp-count").textContent = String(servers.length);
+  $("global-mcp-count").title = `${servers.length} 个已登记，${loadedCount} 个代理启用，${reachableCount} 个已确认可达`;
   $("global-mcp-summary").textContent = servers.length
-    ? `已加载 ${loadedCount} / 已配置 ${servers.length} · 涉及 ${workspaceIds.size} 个工作区`
+    ? `已登记 ${servers.length} · 代理启用 ${loadedCount} · 可达 ${reachableCount} · 涉及 ${workspaceIds.size} 个工作区`
     : "所有工作区目前都没有配置本地 MCP。";
   const dialog = $("global-mcp-dialog");
   if (globalMcpOpen && !dialog.open) dialog.showModal();
@@ -176,15 +177,15 @@ function renderGlobalMcps() {
     const loaded = server.loaded === true;
     const running = snapshot.status.state === "running";
     const probe = server.probeStatus || "unknown";
-    const stateText = !running ? "Bridge 已停止" : probe === "available" ? "可用" : probe === "unavailable" ? "不可用" : "尚未检测";
+    const stateText = !running ? "Bridge 已停止" : probe === "available" ? "可达" : probe === "unavailable" ? "不可达" : "尚未检测";
     const stateClass = running && probe === "available" ? "good" : running && probe === "unavailable" ? "bad" : "";
     const detail = probe === "available"
       ? `${server.toolCount ?? 0} tools · ${server.latencyMs ?? 0}ms`
       : probe === "unavailable" ? (server.probeError || "检测失败") : "检测后显示工具数量与延迟";
     return `<article class="global-mcp-card">
-      <div class="global-mcp-card-heading"><div><p class="global-mcp-workspace">${escape(workspaces.get(server.workspaceId)?.id || server.workspaceId)}</p><h3>${escape(server.serverId)}</h3></div><span class="badge ${loaded ? "good" : ""}">${loaded ? "已加载" : "未加载"}</span></div>
+      <div class="global-mcp-card-heading"><div><p class="global-mcp-workspace">${escape(workspaces.get(server.workspaceId)?.id || server.workspaceId)}</p><h3>${escape(server.serverId)}</h3></div><span class="badge ${loaded ? "good" : ""}">${loaded ? "代理开" : "代理关"}</span><span class="badge">${server.source === "runtime" ? "热注册" : "配置"}</span></div>
       <p class="mono global-mcp-url">${escape(server.url)}</p>
-      <div class="global-mcp-card-footer"><span class="global-mcp-probe ${stateClass}"><i class="dot ${stateClass}"></i>${escape(stateText)} <small>${escape(detail)}</small></span><div class="mcp-actions"><button data-global-mcp="local-mcp-probe" data-workspace="${escape(server.workspaceId)}" data-server="${escape(server.serverId)}">检测</button><button data-global-mcp="${loaded ? "local-mcp-unload" : "local-mcp-load"}" data-workspace="${escape(server.workspaceId)}" data-server="${escape(server.serverId)}" class="${loaded ? "danger" : "primary"}">${loaded ? "卸载" : "加载"}</button></div></div>
+      <div class="global-mcp-card-footer"><span class="global-mcp-probe ${stateClass}"><i class="dot ${stateClass}"></i>${escape(stateText)} <small>${escape(detail)}</small></span><div class="mcp-actions"><button data-global-mcp="local-mcp-probe" data-workspace="${escape(server.workspaceId)}" data-server="${escape(server.serverId)}">检测</button><button data-global-mcp="${loaded ? "local-mcp-unload" : "local-mcp-load"}" data-workspace="${escape(server.workspaceId)}" data-server="${escape(server.serverId)}" class="${loaded ? "danger" : "primary"}">${loaded ? "停用代理" : "启用代理"}</button></div></div>
       ${probe === "unavailable" && server.probeError ? `<p class="global-mcp-error">${escape(server.probeError)}</p>` : ""}
     </article>`;
   }).join("") : '<div class="empty-state"><span aria-hidden="true">⊞</span><h3>尚未配置本地 MCP</h3><p>此处会汇总所有工作区的 MCP。请先在对应工作区的 mcpServers 中添加服务地址。</p></div>';
@@ -325,156 +326,10 @@ function renderCodexDefaults() {
     ? "请先停止 Bridge，再修改默认值。"
     : busy ? "正在执行操作…" : "保存时会检查配置版本，避免覆盖其他程序的并发修改。";
 }
-function renderSshHosts() {
-  const dialog = $("ssh-hosts-dialog");
-  if (!sshHostsOpen) {
-    if (dialog.open) dialog.close();
-    return;
-  }
-  if (!dialog.open) dialog.showModal();
-  const trusted = snapshot?.workspaces?.some(workspace => workspace.mode === "trusted-dev") === true;
-  $("ssh-host-count").textContent = sshHostsLoaded ? String(sshHosts.length) : "›";
-  $("settings-ssh-summary").textContent = !trusted
-    ? "需要至少一个 trusted-dev 工作区"
-    : sshHostsLoaded ? sshHosts.length + " 个已保存主机 · 密码保存在本机 Keychain" : "密码安全保存在本机 Keychain";
-  $("ssh-host-add").disabled = !trusted || sshHostBusy;
-  $("ssh-hosts-summary").textContent = !trusted
-    ? "SSH 主机管理需要至少一个 trusted-dev 工作区。请先在项目设置中调整权限模式。"
-    : sshHostsLoaded ? sshHosts.length + " 个全局 SSH 主机 · 密码不会写入主机元数据" : "正在读取主机列表…";
-  $("ssh-host-list").hidden = sshHostFormOpen;
-  $("ssh-host-list-actions").hidden = sshHostFormOpen;
-  $("ssh-host-form").hidden = !sshHostFormOpen;
-  $("ssh-host-list").innerHTML = sshHosts.length ? sshHosts.map(host => {
-    const credential = host.credentialAvailable ? "凭据已保存" : "未检测到已保存密码";
-    const tone = host.credentialAvailable ? "good" : "warn";
-    return '<article class="ssh-host-card"><div class="ssh-host-card-heading"><div><p class="ssh-host-workspace">全局主机</p><h3>' + escape(host.hostId) + '</h3></div><span class="badge ' + tone + '">' + credential + '</span></div><p class="ssh-host-address">' + escape(host.username) + '@' + escape(host.host) + ':' + escape(host.port) + '</p><div class="ssh-host-meta"><span>SSH</span><span>端口 ' + escape(host.port) + '</span></div><div class="ssh-host-card-actions"><button type="button" data-ssh-edit="' + escape(host.hostId) + '">编辑</button><button type="button" class="danger" data-ssh-delete="' + escape(host.hostId) + '">删除</button></div></article>';
-  }).join("") : '<div class="empty-state"><span aria-hidden="true">⌁</span><h3>尚未保存 SSH 主机</h3><p>添加常用主机后，SSH MCP 工具可以使用别名发起交互式连接。</p></div>';
-  $("ssh-host-list").querySelectorAll("[data-ssh-edit]").forEach(button => {
-    button.disabled = sshHostBusy || !trusted;
-    button.addEventListener("click", () => {
-      const host = sshHosts.find(item => item.hostId === button.dataset.sshEdit);
-      if (host) openSshHostForm(host);
-    });
-  });
-  $("ssh-host-list").querySelectorAll("[data-ssh-delete]").forEach(button => {
-    button.disabled = sshHostBusy || !trusted;
-    button.addEventListener("click", async () => {
-      const host = sshHosts.find(item => item.hostId === button.dataset.sshDelete);
-      if (!host || !(await confirmAction("删除 SSH 主机？", "将删除 " + host.hostId + " 的本地主机记录及对应 Keychain 密码，不会修改远程服务器。"))) return;
-      sshHostBusy = true;
-      renderSshHosts();
-      try {
-        await request("/api/ssh/remove", {hostId:host.hostId});
-        toast("SSH 主机及本地凭据已删除");
-        await loadSshHosts();
-      } catch (error) {
-        $("ssh-hosts-error").hidden = false;
-        $("ssh-hosts-error").textContent = error.message;
-      } finally {
-        sshHostBusy = false;
-        renderSshHosts();
-      }
-    });
-  });
-}
-async function loadSshHosts() {
-  const result = await request("/api/ssh/hosts");
-  sshHosts = Array.isArray(result.hosts) ? result.hosts : [];
-  sshHostsLoaded = true;
-  $("ssh-hosts-error").hidden = true;
-  renderSshHosts();
-}
-async function openSshHosts() {
-  sshHostsOpen = true;
-  sshHostFormOpen = false;
-  sshHostEditing = undefined;
-  $("ssh-host-password").value = "";
-  $("ssh-hosts-error").hidden = true;
-  renderSshHosts();
-  const trusted = snapshot?.workspaces?.some(workspace => workspace.mode === "trusted-dev") === true;
-  if (!trusted) return;
-  $("ssh-hosts-summary").textContent = "正在读取主机列表…";
-  try { await loadSshHosts(); }
-  catch (error) {
-    $("ssh-hosts-error").hidden = false;
-    $("ssh-hosts-error").textContent = error.message;
-    $("ssh-hosts-summary").textContent = "无法读取 SSH 主机列表";
-  }
-}
-function closeSshHosts() {
-  sshHostsOpen = false;
-  sshHostFormOpen = false;
-  sshHostEditing = undefined;
-  $("ssh-host-password").value = "";
-  renderSshHosts();
-}
-function openSshHostForm(host) {
-  sshHostEditing = host;
-  sshHostFormOpen = true;
-  $("ssh-host-form-title").textContent = host ? "编辑 SSH 主机" : "添加 SSH 主机";
-  $("ssh-host-id").value = host?.hostId || "";
-  $("ssh-host-address").value = host?.host || "";
-  $("ssh-host-username").value = host?.username || "";
-  $("ssh-host-port").value = String(host?.port || 22);
-  $("ssh-host-password").value = "";
-  $("ssh-host-password").required = !host || !host.credentialAvailable;
-  $("ssh-host-password").placeholder = host?.credentialAvailable ? "留空以保留当前密码" : "请输入要保存的 SSH 密码";
-  $("ssh-host-form-hint").textContent = host?.credentialAvailable
-    ? "密码已保存在本机 Keychain。留空将保留现有密码；输入新密码则替换。"
-    : "尚未检测到已保存密码，必须输入密码。密码不会写入主机元数据或日志。";
-  $("ssh-host-form-error").hidden = true;
-  renderSshHosts();
-  $("ssh-host-id").focus();
-}
-async function saveSshHost(event) {
-  event.preventDefault();
-  if (sshHostBusy) return;
-  const hostId = $("ssh-host-id").value.trim();
-  const host = $("ssh-host-address").value.trim();
-  const username = $("ssh-host-username").value.trim();
-  const port = Number($("ssh-host-port").value);
-  const password = $("ssh-host-password").value;
-  if (!hostId || !host || !username || !Number.isInteger(port) || port < 1 || port > 65535) {
-    $("ssh-host-form-error").hidden = false;
-    $("ssh-host-form-error").textContent = "请完整填写别名、地址、用户名和有效端口。";
-    return;
-  }
-  if ((!sshHostEditing || !sshHostEditing.credentialAvailable) && !password) {
-    $("ssh-host-form-error").hidden = false;
-    $("ssh-host-form-error").textContent = "请填写 SSH 密码。";
-    return;
-  }
-  const payload = {hostId, host, username, port};
-  if (sshHostEditing) payload.previousHostId = sshHostEditing.hostId;
-  if (password) payload.password = password;
-  sshHostBusy = true;
-  $("ssh-host-form-error").hidden = true;
-  for (const id of ["ssh-host-id", "ssh-host-address", "ssh-host-username", "ssh-host-port", "ssh-host-password", "ssh-host-form-save"]) $(id).disabled = true;
-  try {
-    await request("/api/ssh/save", payload);
-    $("ssh-host-password").value = "";
-    sshHostFormOpen = false;
-    sshHostEditing = undefined;
-    toast("SSH 主机已保存到本机");
-    try { await loadSshHosts(); }
-    catch (error) {
-      $("ssh-hosts-error").hidden = false;
-      $("ssh-hosts-error").textContent = "主机已保存，但列表刷新失败：" + error.message;
-    }
-  } catch (error) {
-    $("ssh-host-form-error").hidden = false;
-    $("ssh-host-form-error").textContent = error.message;
-  } finally {
-    sshHostBusy = false;
-    for (const id of ["ssh-host-id", "ssh-host-address", "ssh-host-username", "ssh-host-port", "ssh-host-password", "ssh-host-form-save"]) $(id).disabled = false;
-    renderSshHosts();
-  }
-}
 async function refresh() {
   snapshot=await request("/api/snapshot");
   if(!currentWorkspaces().some(w=>w.id===selected)){selected=currentWorkspaces()[0]?.id;selectedModule=undefined;}
   $("settings-codex-summary").textContent = (snapshot.codexDefaults?.defaultModel || "未设置") + " · " + (snapshot.codexDefaults?.defaultEffort || "未设置");
-  if (!sshHostsLoaded) $("settings-ssh-summary").textContent = snapshot.workspaces.some(workspace => workspace.mode === "trusted-dev") ? "密码安全保存在本机 Keychain" : "需要至少一个 trusted-dev 工作区";
   renderConnectionSetup();renderApiPortSettings();renderCodexDefaults();renderChain();renderTree();renderInspector();renderGlobalMcps();renderLogs();updateButtons();
 }
 async function poll() {
@@ -507,26 +362,6 @@ $("settings-edit-codex-defaults").addEventListener("click", () => {
   renderCodexDefaults();
   $("codex-default-model").focus();
 });
-$("settings-open-ssh-hosts").addEventListener("click", () => {
-  closeSettingsMenu();
-  void openSshHosts();
-});
-$("ssh-hosts-close").addEventListener("click", closeSshHosts);
-$("ssh-hosts-dialog").addEventListener("cancel", closeSshHosts);
-$("ssh-hosts-dialog").addEventListener("close", () => {
-  sshHostsOpen = false;
-  sshHostFormOpen = false;
-  sshHostEditing = undefined;
-  $("ssh-host-password").value = "";
-});
-$("ssh-host-add").addEventListener("click", () => openSshHostForm(undefined));
-$("ssh-host-form-cancel").addEventListener("click", () => {
-  sshHostFormOpen = false;
-  sshHostEditing = undefined;
-  $("ssh-host-password").value = "";
-  renderSshHosts();
-});
-$("ssh-host-form").addEventListener("submit", event => { void saveSshHost(event); });
 $("codex-defaults-close").addEventListener("click", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; renderCodexDefaults(); });
 $("codex-defaults-cancel").addEventListener("click", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; renderCodexDefaults(); });
 $("codex-defaults-dialog").addEventListener("cancel", () => { codexDefaultsOpen = false; codexDefaultsInitialized = false; });
